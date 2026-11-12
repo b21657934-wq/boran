@@ -90,7 +90,8 @@ body.day .wx-temp{background:linear-gradient(180deg,#0E2A4F 10%,#1B7FA8 95%);-we
 #badge{position:fixed;z-index:9;left:50%;transform:translateX(-50%);top:calc(var(--sat) + 14px);border-radius:14px;padding:7px 12px;font-size:12px;color:var(--warn);font-weight:600;max-width:40vw;text-align:center}
 #legend{position:fixed;z-index:8;right:calc(var(--sar) + 12px);bottom:calc(var(--sab) + 14px);border-radius:14px;padding:9px 12px 8px;font-size:11px;color:var(--t2);display:grid;grid-template-columns:auto auto;gap:5px 10px;width:150px}
 #legend span{grid-column:1/-1;font-weight:600;letter-spacing:.08em;text-transform:uppercase;font-size:10px}
-#legend i{grid-column:1/-1;height:5px;border-radius:3px;background:linear-gradient(90deg,var(--ok),var(--warn),var(--bad));box-shadow:0 0 10px rgba(255,181,71,.35)}
+#legend i{grid-column:1/-1;height:5px;border-radius:3px;background:linear-gradient(90deg,#4A5A76 0%,#FFB547 55%,#FF4D6A 100%);box-shadow:0 0 10px rgba(255,120,90,.3)}
+body.day #legend i{background:linear-gradient(90deg,#9AA7B6 0%,#F2A93B 55%,#E0344C 100%);box-shadow:none}
 #legend em{font-style:normal}#legend em:last-child{text-align:right}
 
 #panel{position:fixed;z-index:12;left:calc(var(--sal) + 12px);bottom:calc(var(--sab) + 12px);width:372px;border-radius:var(--r3);max-height:calc(100dvh - 300px);display:flex;flex-direction:column;transition:transform .3s var(--ease)}

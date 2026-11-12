@@ -46,7 +46,13 @@
       S.city = args.city || await fetch('city.json?v=' + args.cityVersion).then((r) => r.json());
       S.tileSet = new Set(S.city.tiles); S.tiles = new Map(); S.tileReq = new Map(); S.tileShown = '';
       S.big = null; S.bigReq = null;
-      if (S.city.inline) { for (const k in S.city.inline) S.tiles.set(k, tileFeats(S.city.inline[k])); S.big = tileFeats([].concat(...Object.values(S.city.inline)).filter((x) => x[2] === 1)); }
+      S.heat = null; S.heatReq = null;
+      if (S.city.inline) {
+        const { heat, ...rest } = S.city.inline;
+        for (const k in rest) S.tiles.set(k, tileFeats(rest[k]));
+        S.big = tileFeats([].concat(...Object.values(rest)).filter((x) => x[2] === 1));
+        S.heat = heat ? heatFeats(heat) : null;
+      }
       S.riskTable = args.riskTable;
       await initMap();
     }
@@ -84,22 +90,58 @@
   const FC = (features) => ({ type: 'FeatureCollection', features: features || [] });
   const PAL = {
     day: {
-      bg: '#F4F1EA', res: '#EFEBE3', block: '#ECE7DD', park: '#CDE6B1', wood: '#BCDDA0', pitch: '#C6E3AC', water: '#9ECDF4', waterLine: '#8EC3EF',
-      road: '#FFFFFF', casing: '#DAD4C8', majorCasing: '#CBC3B5', path: '#E4DFD5', rail: '#C9C3B8', bld2d: '#E6E0D5', bldOutline: '#D3CCBF',
-      bld3d: '#F2EFE9', text: '#3D3D3D', poiText: '#666058', waterText: '#3C7DC0', halo: '#FFFFFF',
-      risk: ['#2DBE80', '#F2A93B', '#E8414B'], route: '#1E88E5', routeCasing: '#FFFFFF', routeGlow: '#1E88E5', short: '#5E6B85', ride: '#F07A1A', wave: '#1E88E5', warm: '#F07A1A', worst: '#E8414B',
-      light: { anchor: 'viewport', color: '#FFFFFF', intensity: 0.32, position: [1.25, 195, 32] },
+      bg: '#F1F4F7', res: '#E9EEF2', block: '#E5EAEF', park: '#E7EDF2', tree: '#BCC9D6', wood: '#DDE5EC', woodTree: '#AEBFCF', pitch: '#E7EDF2',
+      water: '#CBDDEA', iceCrack: '#A6C2D6', iceShine: '#EAF3F9', waterLine: '#B6CEDF',
+      road: '#A9B3BE', sec: '#808C9A', major: '#5A6573', casing: '#F1F4F7', majorCasing: '#F1F4F7', path: '#C8D0D8', rail: '#B0BAC5',
+      bld2d: '#E0E6EC', bldOutline: '#CCD5DE', bld3d: '#F5F8FA', bldTall: '#D2DDE8', text: '#1F2A37', poiText: '#5B6878', waterText: '#45708E', halo: '#F1F4F7',
+      risk: ['#9AA7B6', '#F2A93B', '#E0344C'], ok: '#1FA971', heat: ['rgba(242,169,59,0.16)', 'rgba(238,128,48,0.34)', 'rgba(224,52,76,0.5)'],
+      route: '#0B7A92', routeCasing: '#FFFFFF', routeGlow: '#14A5C2', short: '#5E6B85', ride: '#6C4CE0', wave: '#0B7A92', warm: '#E8743B', worst: '#E0344C',
+      light: { anchor: 'viewport', color: '#FFFFFF', intensity: 0.3, position: [1.3, 200, 35] },
+      sky: { 'sky-color': '#BCD1E5', 'horizon-color': '#EEF3F7', 'fog-color': '#E7EDF3', 'fog-ground-blend': 0.5, 'horizon-fog-blend': 0.7, 'sky-horizon-blend': 0.6, 'atmosphere-blend': 0.4 },
     },
     night: {
-      bg: '#0A1022', res: '#0D152C', block: '#0E1630', park: '#10283A', wood: '#0F2A36', pitch: '#123044', water: '#123463', waterLine: '#1B4A85',
-      road: '#2A3862', casing: '#0A1022', majorCasing: '#0A1022', path: '#243259', rail: '#28324F', bld2d: '#18244A', bldOutline: '#27386A',
-      bld3d: '#22305E', text: '#E6EDFF', poiText: '#A9B8DE', waterText: '#6F9FE0', halo: '#0A1022',
-      risk: ['#4BE3A0', '#FFB547', '#FF5A5F'], route: '#BFF1FF', routeCasing: '#0A1022', routeGlow: '#4FD8F0', short: '#A9B4D0', ride: '#FFB46B', wave: '#9FE3FF', warm: '#FFB46B', worst: '#FF5A5F',
-      light: { anchor: 'viewport', color: '#A9BEFF', intensity: 0.32, position: [1.2, 210, 35] },
+      bg: '#0B1220', res: '#0E1626', block: '#0F1828', park: '#111C2D', tree: '#1F2E45', wood: '#121F31', woodTree: '#24364F', pitch: '#111C2D',
+      water: '#122A43', iceCrack: '#24476A', iceShine: '#1A3856', waterLine: '#1D3B5B',
+      road: '#283550', sec: '#34445F', major: '#4A5D7E', casing: '#0B1220', majorCasing: '#0B1220', path: '#1E2A42', rail: '#2A3550',
+      bld2d: '#151F33', bldOutline: '#1F2B44', bld3d: '#1C2740', bldTall: '#283A5C', text: '#DCE6F5', poiText: '#8A9AB8', waterText: '#6E9CC8', halo: '#0B1220',
+      risk: ['#4A5A76', '#FFB547', '#FF4D6A'], ok: '#4BE3A0', heat: ['rgba(255,181,71,0.16)', 'rgba(255,128,64,0.36)', 'rgba(255,77,106,0.56)'],
+      route: '#7FE7F5', routeCasing: '#0B1220', routeGlow: '#2CC5E0', short: '#8F9BB5', ride: '#B9A6FF', wave: '#7FE7F5', warm: '#FFB46B', worst: '#FF4D6A',
+      light: { anchor: 'viewport', color: '#9DB4FF', intensity: 0.32, position: [1.2, 210, 35] },
+      sky: { 'sky-color': '#04070E', 'horizon-color': '#16233C', 'fog-color': '#0D1627', 'fog-ground-blend': 0.6, 'horizon-fog-blend': 0.8, 'sky-horizon-blend': 0.7, 'atmosphere-blend': 0.4 },
     },
   };
   const pal = () => PAL[isNight() ? 'night' : 'day'];
-
+  function patternImage(kind, night) {
+    const P = PAL[night ? 'night' : 'day'], n = 128, c = document.createElement('canvas');
+    c.width = c.height = n;
+    const g = c.getContext('2d');
+    let seed = kind === 'ice' ? 11 : kind === 'wood' ? 29 : 17;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const wrap = (fn) => { for (const dx of [-n, 0, n]) for (const dy of [-n, 0, n]) { g.save(); g.translate(dx, dy); fn(); g.restore(); } };
+    g.fillStyle = kind === 'ice' ? P.water : kind === 'wood' ? P.wood : P.park;
+    g.fillRect(0, 0, n, n);
+    if (kind === 'ice') {
+      for (let i = 0; i < 5; i++) {
+        const x = rnd() * n, y = rnd() * n, r = 10 + rnd() * 22;
+        wrap(() => { const gr = g.createRadialGradient(x, y, 0, x, y, r); gr.addColorStop(0, P.iceShine); gr.addColorStop(1, 'rgba(0,0,0,0)'); g.globalAlpha = 0.55; g.fillStyle = gr; g.fillRect(x - r, y - r, 2 * r, 2 * r); });
+      }
+      g.globalAlpha = 1;
+      for (let i = 0; i < 6; i++) {
+        const pts = []; let x = rnd() * n, y = rnd() * n, a = rnd() * Math.PI * 2;
+        pts.push([x, y]);
+        for (let j = 0; j < 6; j++) { a += (rnd() - 0.5) * 1.3; const L = 5 + rnd() * 13; x += Math.cos(a) * L; y += Math.sin(a) * L; pts.push([x, y]); }
+        const w = 0.6 + rnd() * 0.7;
+        wrap(() => { g.strokeStyle = P.iceCrack; g.lineWidth = w; g.lineCap = 'round'; g.beginPath(); pts.forEach(([px, py], k) => (k ? g.lineTo(px, py) : g.moveTo(px, py))); g.stroke(); });
+      }
+    } else {
+      const count = kind === 'wood' ? 70 : 26, col = kind === 'wood' ? P.woodTree : P.tree;
+      for (let i = 0; i < count; i++) {
+        const x = rnd() * n, y = rnd() * n, r = 1.3 + rnd() * (kind === 'wood' ? 2.4 : 1.8), al = 0.45 + rnd() * 0.45;
+        wrap(() => { g.globalAlpha = al; g.fillStyle = col; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); });
+      }
+    }
+    return g.getImageData(0, 0, n, n);
+  }
   function restyle(base, night, lang) {
     const st = JSON.parse(JSON.stringify(base));
     const P = PAL[night ? 'night' : 'day'];
@@ -113,9 +155,10 @@
       if (L.type === 'background') p['background-color'] = P.bg;
       else if (L.type === 'fill') {
         delete p['fill-pattern'];
-        if (id === 'water') p['fill-color'] = P.water;
-        else if (id === 'park' || id === 'landcover_grass') { p['fill-color'] = P.park; p['fill-opacity'] = 1; }
-        else if (id === 'landcover_wood') { p['fill-color'] = P.wood; p['fill-opacity'] = 1; }
+        const th = night ? 'night' : 'day';
+        if (id === 'water') { p['fill-color'] = P.water; p['fill-pattern'] = 'b-ice-' + th; }
+        else if (id === 'park' || id === 'landcover_grass') { p['fill-color'] = P.park; p['fill-opacity'] = 1; p['fill-pattern'] = 'b-park-' + th; }
+        else if (id === 'landcover_wood') { p['fill-color'] = P.wood; p['fill-opacity'] = 1; p['fill-pattern'] = 'b-wood-' + th; }
         else if (/pitch|track/.test(id)) { p['fill-color'] = P.pitch; p['fill-opacity'] = 1; }
         else if (id === 'landuse_residential') { p['fill-color'] = P.res; p['fill-opacity'] = 1; }
         else if (/landuse|landcover|aeroway/.test(id)) { p['fill-color'] = P.block; p['fill-opacity'] = 1; }
@@ -128,6 +171,8 @@
           if (/rail/.test(id)) p['line-color'] = P.rail;
           else if (/casing/.test(id)) p['line-color'] = /trunk|primary|motorway/.test(id) ? P.majorCasing : P.casing;
           else if (/path|pedestrian/.test(id)) p['line-color'] = P.path;
+          else if (/motorway|trunk_primary/.test(id)) p['line-color'] = P.major;
+          else if (/secondary_tertiary/.test(id)) p['line-color'] = P.sec;
           else p['line-color'] = P.road;
         } else if (sl === 'aeroway') p['line-color'] = P.casing;
       } else if (L.type === 'fill-extrusion') {
@@ -135,7 +180,20 @@
         p['fill-extrusion-vertical-gradient'] = true;
         L.minzoom = 12.6;
         p['fill-extrusion-opacity'] = ['interpolate', ['linear'], ['zoom'], 12.6, 0, 13.4, 1];
+        const tall = ['>=', ['coalesce', ['get', 'render_height'], 0], 48], f0 = L.filter;
+        L.filter = f0 ? ['all', f0, ['!', tall]] : ['!', tall];
+        out.push(L);
+        const T = JSON.parse(JSON.stringify(L));
+        T.id = id + '-tall'; T.filter = f0 ? ['all', f0, tall] : tall; T.paint['fill-extrusion-color'] = P.bldTall;
+        out.push(T);
+        continue;
       } else if (L.type === 'symbol') {
+        if (sl === 'poi' && id !== 'poi_transit') {
+          if (id !== 'poi_r1') continue;
+          delete L.layout['icon-image']; delete L.layout['text-variable-anchor'];
+          L.layout['text-offset'] = [0, 0]; L.layout['text-anchor'] = 'center'; L.layout['text-size'] = 11.5;
+          L.minzoom = Math.max(L.minzoom || 0, 15.6);
+        }
         if (L.layout['text-field'] && /place|poi|transportation_name|water_name|waterway|aerodrome/.test(sl)) {
           L.layout['text-field'] = ['coalesce', ['get', nameKey], ['get', 'name:ru'], ['get', 'name'], ['get', 'name:latin']];
         }
@@ -154,12 +212,13 @@
     }
     st.layers = out;
     st.light = P.light;
+    st.sky = P.sky;
     return st;
   }
 
   function flatStyle(night) {
     const P = PAL[night ? 'night' : 'day'];
-    return { version: 8, glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf', sources: {}, layers: [{ id: 'background', type: 'background', paint: { 'background-color': P.bg } }], light: P.light };
+    return { version: 8, glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf', sources: {}, layers: [{ id: 'background', type: 'background', paint: { 'background-color': P.bg } }], light: P.light, sky: P.sky };
   }
 
   function circlePoly(lon, lat, r, n = 28) {
@@ -247,6 +306,15 @@
     wait.forEach((k) => loadTile(k).then(() => { if (!tileTimer) tileTimer = setTimeout(showTiles, 80); }));
     showTiles();
   }
+  function heatFeats(arr) { return arr.map(([lon, lat, m, c]) => ({ type: 'Feature', properties: { m, c }, geometry: { type: 'Point', coordinates: [lon, lat] } })); }
+  function loadHeat() {
+    if (S.heat || S.heatReq) return;
+    const v = S.cityVersion;
+    S.heatReq = fetch('tiles/' + v + '/heat.json').then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then((arr) => { S.heatReq = null; if (v !== S.cityVersion) return; S.heat = heatFeats(arr); const s = src('b-heat'); if (s) s.setData(FC(S.heat)); })
+      .catch(() => { S.heatReq = null; });
+  }
+  const heatWeight = () => ['*', ['min', 1, ['/', ['get', 'c'], 8]], ['max', 0, ['/', ['-', rExpr(), 42], 58]]];
   const rExpr = () => ['at', ['get', 'm'], ['literal', S.riskTable && S.riskTable.length === 32 ? S.riskTable : new Array(32).fill(0)]];
   const riskPaint = (P) => ['interpolate', ['linear'], rExpr(), 20, P.risk[0], 50, P.risk[1], 80, P.risk[2]];
   const glowFilter = () => ['all', ['>=', rExpr(), 80], ['==', ['get', 'b'], 1]];
@@ -255,8 +323,9 @@
     const P = PAL[isNight() ? 'night' : 'day'];
     const firstBld = st.layers.findIndex((L) => L.id === 'building' || L.type === 'fill-extrusion');
     const firstSym = st.layers.findIndex((L) => L.type === 'symbol');
-    const before = firstBld < 0 ? (firstSym < 0 ? st.layers.length : firstSym) : firstBld;
+    let before = firstBld < 0 ? (firstSym < 0 ? st.layers.length : firstSym) : firstBld;
     Object.assign(st.sources, {
+      'b-heat': { type: 'geojson', data: FC(S.heat || []) },
       'b-risk': { type: 'geojson', data: riskFeatures(), tolerance: 0.6 },
       'b-route': { type: 'geojson', data: FC(), lineMetrics: true },
       'b-short': { type: 'geojson', data: FC() },
@@ -271,6 +340,15 @@
       'b-cmp-wave': { type: 'geojson', data: FC() },
     });
     const riskColor = riskPaint(P);
+    const heat = { id: 'b-heat', type: 'heatmap', source: 'b-heat', maxzoom: 14.6,
+      paint: { 'heatmap-weight': heatWeight(), 'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 10, 0.7, 14, 1.8],
+        'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 10, 7, 12, 16, 14, 42],
+        'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(0,0,0,0)', 0.18, P.heat[0], 0.5, P.heat[1], 0.9, P.heat[2]],
+        'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 12.6, 0.95, 14.4, 0] } };
+    const firstRoad = st.layers.findIndex((L) => L['source-layer'] === 'transportation');
+    const heatAt = firstRoad < 0 ? Math.min(1, st.layers.length) : firstRoad;
+    st.layers.splice(heatAt, 0, heat);
+    if (heatAt <= before) before += 1;
     const below = [
       { id: 'b-risk-glow', type: 'line', source: 'b-risk', minzoom: 13, filter: glowFilter(), layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': riskColor, 'line-blur': 4, 'line-opacity': isNight() ? 0.4 : 0.22, 'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 13, 3, 16, 10, 18, 24] } },
@@ -297,7 +375,7 @@
       { id: 'b-cmp', type: 'line', source: 'b-cmp', filter: ['==', ['get', 'sel'], 1], layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': ['get', 'c'], 'line-opacity': ['case', ['==', ['get', 'sel'], 1], 1, 0.45], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, ['case', ['==', ['get', 'sel'], 1], 4, 2], 17, ['case', ['==', ['get', 'sel'], 1], 9, 3.5]] } },
       { id: 'b-runner', type: 'circle', source: 'b-runner', paint: { 'circle-radius': 6, 'circle-color': '#FFFFFF', 'circle-stroke-color': P.route, 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' } },
-      { id: 'b-marks', type: 'circle', source: 'b-marks', paint: { 'circle-radius': 6, 'circle-color': ['match', ['get', 'a'], 'ice', P.risk[2], 'packed', P.risk[1], P.risk[0]], 'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 1.5 } },
+      { id: 'b-marks', type: 'circle', source: 'b-marks', paint: { 'circle-radius': 6, 'circle-color': ['match', ['get', 'a'], 'ice', P.risk[2], 'packed', P.risk[1], P.ok], 'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 1.5 } },
     ];
     st.layers.splice(before, 0, ...below);
     const ext = st.layers.findIndex((L) => L.type === 'fill-extrusion');
@@ -328,7 +406,7 @@
     S.styleTry = (S.styleTry || 0) + 1;
     const attempt = S.styleTry;
     map.setStyle(full, { diff: false });
-    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; S.tileShown = ''; refreshTiles(); pushRoute(true); pushMarks(); pushCompare(); });
+    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; S.tileShown = ''; refreshTiles(); loadHeat(); pushRoute(true); pushMarks(); pushCompare(); });
     setTimeout(() => {
       if (attempt !== S.styleTry || (map.getStyle() && map.getLayer('b-risk'))) return;
       if (attempt > 3) return;
@@ -348,6 +426,10 @@
     const foldAttrib = () => { const a = document.querySelector('.maplibregl-ctrl-attrib'); if (a) { a.classList.add('maplibregl-compact'); a.classList.remove('maplibregl-compact-show'); a.removeAttribute('open'); } };
     map.once('load', () => setTimeout(foldAttrib, 400)); map.on('styledata', () => setTimeout(foldAttrib, 400));
     map.on('moveend', refreshTiles);
+    map.on('styleimagemissing', (ev) => {
+      const k = /^b-(ice|park|wood)-(day|night)$/.exec(ev.id);
+      if (k && !map.hasImage(ev.id)) map.addImage(ev.id, patternImage(k[1], k[2] === 'night'), { pixelRatio: 2 });
+    });
     map.on('click', (ev) => onMapClick({ coordinate: [ev.lngLat.lng, ev.lngLat.lat], x: ev.point.x, y: ev.point.y }));
     map.on('error', (ev) => { if (ev && ev.error && /style|layers\[/.test(String(ev.error.message))) console.warn(ev.error.message); });
     window.__map = map;
@@ -389,6 +471,7 @@
     const P = PAL[isNight() ? 'night' : 'day'];
     setPaint('b-risk', 'line-color', riskPaint(P)); setPaint('b-risk-glow', 'line-color', riskPaint(P));
     if (map.getLayer('b-risk-glow')) map.setFilter('b-risk-glow', glowFilter());
+    setPaint('b-heat', 'heatmap-weight', heatWeight());
   }
   function pushMarks() { const s = src('b-marks'); if (s) s.setData(FC(S.marks.map((m) => ({ type: 'Feature', properties: { a: m.actual }, geometry: { type: 'Point', coordinates: [m.lon, m.lat] } })))); }
 

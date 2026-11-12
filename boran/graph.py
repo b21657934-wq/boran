@@ -18,6 +18,7 @@ CLEANED = {"primary", "secondary", "tertiary", "pedestrian"}
 BIG = {"primary", "secondary"}
 FEATURE_BITS = {"shade": 1, "open": 2, "uncleaned": 4, "stop": 8, "bridge": 16}
 CELL = (0.02, 0.03)
+HEAT_CELL = (0.003, 0.0045)
 
 
 def overpass(query, timeout=100):
@@ -287,11 +288,20 @@ class City:
             mid = ed["p"][len(ed["p"]) // 2]
             key = f"{int((mid[1] - s) // cell[0])}_{int((mid[0] - w) // cell[1])}"
             tiles.setdefault(key, []).append([ed["p"], ed["mask"] & 31, 1 if ed["hw"] in BIG else 0])
+        heat = {}
+        for ed in d["edges"]:
+            mid = ed["p"][len(ed["p"]) // 2]
+            k = (int((mid[1] - s) // HEAT_CELL[0]), int((mid[0] - w) // HEAT_CELL[1]), ed["mask"] & 31)
+            h = heat.setdefault(k, [0.0, 0.0, 0.0])
+            h[0] += mid[0] * ed["len"]
+            h[1] += mid[1] * ed["len"]
+            h[2] += ed["len"]
+        tiles["heat"] = [[round(h[0] / h[2], 4), round(h[1] / h[2], 4), k[2], round(h[2] / 100, 1)] for k, h in heat.items() if h[2] > 0]
         meta = {
             "demo": d.get("demo", False),
             "bbox": d["bbox"],
             "cell": list(cell),
-            "tiles": sorted(tiles),
+            "tiles": sorted(k for k in tiles if k != "heat"),
             "stats": {"nodes": len(self.nodes), "edges": len(self.edges)},
             "water": d["water"],
             "stops": d["stops"],

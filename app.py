@@ -53,7 +53,7 @@ def load_city(signature):
             with open(os.path.join(tile_dir, key + ".json"), "w", encoding="utf-8") as f:
                 json.dump(edges, f, separators=(",", ":"))
         with open(os.path.join(tile_dir, "big.json"), "w", encoding="utf-8") as f:
-            json.dump([e for edges in tiles.values() for e in edges if e[2] == 1], f, separators=(",", ":"))
+            json.dump([e for key, edges in tiles.items() if key != "heat" for e in edges if e[2] == 1], f, separators=(",", ":"))
         with open(os.path.join(FRONTEND, "city.json"), "w", encoding="utf-8") as f:
             f.write(blob)
         return city, version, None
