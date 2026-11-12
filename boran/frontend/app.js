@@ -1,5 +1,6 @@
 (function () {
   const D = window.deck;
+  window.addEventListener('error', (e) => { try { const b = document.getElementById('toast'); b.textContent = 'JS: ' + e.message; b.hidden = false; } catch (x) { } });
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -45,7 +46,7 @@
       S.cityVersion = args.cityVersion;
       S.city = args.city || await fetch('city.json?v=' + args.cityVersion).then((r) => r.json());
       S.city.edges.forEach((e, i) => { const m = e.p[e.p.length >> 1]; e.c = m; e.i = i; });
-      initDeck();
+      await initMap();
     }
     S.risk = args.risk; S.riskVersion += 1;
     document.body.classList.toggle('night', isNight());
@@ -56,7 +57,8 @@
       S.routeKey = key;
       if (args.route) { S.waveT0 = performance.now(); S.routeT0 = S.waveT0 + 900; fitRoute(args.route); $('panel').classList.remove('min'); }
     }
-    S.pendingRoute = false; $('btn-go').classList.remove('busy');
+    if (!S.pendingRoute || args.ack >= S.n) { S.pendingRoute = false; $('btn-go').classList.remove('busy'); }
+    if (args.error && S.wantRoute) toast(args.error === 'no_path' ? t('nopath') : t('err') + ' ' + args.error);
     if (first) startSplash();
   }
 
@@ -67,131 +69,205 @@
     return [c[0], c[1], c[2], alpha];
   }
 
-  let deckgl = null;
-  const VIEW0 = { longitude: 71.4305, latitude: 51.1283, zoom: 14.3, pitch: 58, bearing: -35, maxPitch: 75, minZoom: 11.5, maxZoom: 18 };
-  function setView(v) { S.view = Object.assign({}, S.view || VIEW0, v); deckgl.setProps({ initialViewState: Object.assign({}, S.view) }); }
-  function initDeck() {
-    if (deckgl) { deckgl.finalize(); $('map').innerHTML = ''; }
-    S.view = Object.assign({}, VIEW0);
-    deckgl = new D.Deck({
-      parent: $('map'), views: new D.MapView({ repeat: false, farZMultiplier: 2.2 }), initialViewState: S.view,
-      controller: { dragRotate: true, touchRotate: true, inertia: 300 }, pickingRadius: 6,
-      getCursor: ({ isDragging }) => (isDragging ? 'grabbing' : S.picking || S.markMode ? 'crosshair' : 'grab'),
-      onViewStateChange: ({ viewState }) => { S.live = viewState; },
-      onClick: onMapClick, layers: [],
+
+  const ML = window.maplibregl;
+  const STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
+  let map = null, overlay = null, baseStyle = null, styleKey = null;
+  const markers = { src: null, dst: null, places: [] };
+  const EMPTY = (night) => ({ version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': night ? '#0A1022' : '#EEF3F9' } }] });
+
+  function restyle(style, night, lang) {
+    const st = JSON.parse(JSON.stringify(style));
+    const nameKey = lang === 'kk' ? 'name:kk' : lang === 'en' ? 'name:en' : 'name:ru';
+    const out = [];
+    for (const L of st.layers) {
+      const sl = L['source-layer'] || '', id = L.id;
+      const p = L.paint = Object.assign({}, L.paint);
+      L.layout = Object.assign({}, L.layout);
+      if (sl === 'boundary') continue;
+      if (L.type === 'raster') { if (night) continue; p['raster-opacity'] = 0.35; }
+      if (L.type === 'symbol' && L.layout['text-field'] && /place|poi|transportation_name|water_name|park|aerodrome/.test(sl) && !/shield|ref/.test(id)) {
+        L.layout['text-field'] = ['coalesce', ['get', nameKey], ['get', 'name'], ['get', 'name:latin'], ['get', 'name_en']];
+      }
+      const green = sl === 'park' || sl === 'landcover' || /wood|grass|park|green|forest|cemetery|pitch/.test(id);
+      if (night) {
+        if (L.type === 'background') p['background-color'] = '#0A1022';
+        else if (L.type === 'fill') {
+          delete p['fill-pattern'];
+          p['fill-color'] = sl === 'water' ? '#123463' : sl === 'building' ? '#18244A' : green ? '#0F2536' : '#0E1630';
+          if (sl === 'building') p['fill-outline-color'] = '#27386A';
+          if (typeof p['fill-opacity'] !== 'number') p['fill-opacity'] = sl === 'water' || sl === 'building' ? 1 : 0.7;
+        } else if (L.type === 'line') {
+          delete p['line-pattern'];
+          if (sl === 'waterway') p['line-color'] = '#1B4A85';
+          else if (sl === 'transportation') {
+            const casing = /casing/.test(id), major = /motorway|trunk|primary|secondary/.test(id), rail = /rail|transit/.test(id), path = /path|pedestrian|footway|steps|track/.test(id);
+            p['line-color'] = rail ? '#28324F' : casing ? '#0A1022' : major ? '#40558F' : path ? '#2B3A63' : '#2A3862';
+          } else p['line-color'] = '#1C2747';
+        } else if (L.type === 'symbol') {
+          p['text-color'] = sl === 'water_name' ? '#5E8FD0' : sl === 'place' ? '#E6EDFF' : sl === 'transportation_name' ? '#8FA2CF' : '#A9B8DE';
+          p['text-halo-color'] = '#0A1022'; p['text-halo-width'] = 1.5; delete p['text-halo-blur'];
+          p['icon-opacity'] = 0.65;
+        } else if (L.type === 'fill-extrusion') {
+          p['fill-extrusion-color'] = ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#1A2650', 40, '#24376E', 120, '#3552A0'];
+          p['fill-extrusion-opacity'] = 0.94;
+        }
+      } else {
+        if (L.type === 'background') p['background-color'] = '#F1F5FA';
+        else if (L.type === 'fill') {
+          if (sl === 'water') p['fill-color'] = '#A8CBEB';
+          else if (green) { delete p['fill-pattern']; p['fill-color'] = '#E4EEE9'; }
+          else if (sl === 'building') { p['fill-color'] = '#DCE3EE'; p['fill-outline-color'] = '#C5CFDE'; }
+          else if (sl === 'landuse') { delete p['fill-pattern']; p['fill-color'] = '#ECF1F7'; }
+        } else if (L.type === 'fill-extrusion') {
+          p['fill-extrusion-color'] = ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#E6ECF4', 60, '#D3DDEB', 150, '#BFCDE2'];
+          p['fill-extrusion-opacity'] = 0.96;
+        }
+      }
+      if (L.type === 'fill-extrusion') { L.minzoom = 13; }
+      out.push(L);
+    }
+    if (!out.some((L) => L.type === 'fill-extrusion')) {
+      const src = Object.keys(st.sources).find((k) => st.sources[k].type === 'vector');
+      if (src) {
+        const layer = {
+          id: 'boran-3d', type: 'fill-extrusion', source: src, 'source-layer': 'building', minzoom: 13,
+          paint: { 'fill-extrusion-color': night ? '#1E2C58' : '#DDE4EE', 'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 8], 'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0], 'fill-extrusion-opacity': 0.94 },
+        };
+        const i = out.findIndex((L) => L.type === 'symbol');
+        if (i < 0) out.push(layer); else out.splice(i, 0, layer);
+      }
+    }
+    st.layers = out;
+    st.light = night ? { anchor: 'viewport', color: '#9FB6FF', intensity: 0.35, position: [1.3, 210, 35] } : { anchor: 'viewport', color: '#FFFFFF', intensity: 0.4, position: [1.2, 200, 40] };
+    return st;
+  }
+
+  function applyStyle() {
+    if (!map) return;
+    const key = (isNight() ? 'n' : 'd') + S.lang + (baseStyle ? 1 : 0);
+    if (key === styleKey) return;
+    styleKey = key;
+    map.setStyle(baseStyle && !S.city.demo ? restyle(baseStyle, isNight(), S.lang) : EMPTY(isNight()), { diff: false });
+  }
+
+  const VIEW0 = { center: [71.4305, 51.1283], zoom: 15.2, pitch: 62, bearing: -32 };
+  async function initMap() {
+    if (map) { map.remove(); $('map').innerHTML = ''; styleKey = null; }
+    const [s, w, n, e] = S.city.bbox;
+    map = new ML.Map({
+      container: 'map', style: EMPTY(isNight()), center: VIEW0.center, zoom: VIEW0.zoom, pitch: VIEW0.pitch, bearing: VIEW0.bearing,
+      maxPitch: 72, minZoom: 10.5, maxZoom: 18.5, attributionControl: false, maxBounds: [[w - 0.25, s - 0.15], [e + 0.25, n + 0.15]], antialias: true,
     });
-    S.live = S.view;
+    map.addControl(new ML.AttributionControl({ compact: true, customAttribution: 'OpenFreeMap © OpenMapTiles · © OpenStreetMap' }), 'bottom-right');
+    overlay = new D.MapboxOverlay({ interleaved: false, layers: [] });
+    map.addControl(overlay);
+    map.on('click', (ev) => onMapClick({ coordinate: [ev.lngLat.lng, ev.lngLat.lat], x: ev.point.x, y: ev.point.y }));
+    map.on('error', () => { });
+    window.__map = map;
     requestAnimationFrame(frame);
+    if (!S.city.demo) {
+      try {
+        const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 9000);
+        baseStyle = await fetch(STYLE_URL, { signal: ctl.signal }).then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); });
+        clearTimeout(tm);
+      } catch (err) { baseStyle = null; S.noTiles = true; }
+    }
+    applyStyle(); syncMarkers(); renderAll();
   }
 
-  function lighting() {
-    const night = isNight();
-    return new D.LightingEffect({
-      ambient: new D.AmbientLight({ color: night ? [150, 175, 255] : [255, 255, 255], intensity: night ? 1.25 : 2.1 }),
-      key: new D.DirectionalLight({ color: night ? [160, 190, 255] : [255, 244, 225], intensity: night ? 1.0 : 1.9, direction: [-3, -2, -4] }),
-      rim: new D.DirectionalLight({ color: night ? [255, 170, 110] : [200, 220, 255], intensity: night ? 0.5 : 0.5, direction: [4, 3, -2] }),
+  function pinEl(cls) { const d = el('div', 'pin ' + cls, '<i></i>'); return d; }
+  function syncMarkers() {
+    if (!map || !S.args) return;
+    for (const k of ['src', 'dst']) {
+      const p = S[k];
+      if (!p) { if (markers[k]) { markers[k].remove(); markers[k] = null; } continue; }
+      if (!markers[k]) markers[k] = new ML.Marker({ element: pinEl(k === 'src' ? 'a' : 'b'), anchor: 'center' }).setLngLat([p.lon, p.lat]).addTo(map);
+      else markers[k].setLngLat([p.lon, p.lat]);
+    }
+    markers.places.forEach((m) => m.remove()); markers.places = [];
+    S.args.places.filter((p) => p.kind !== 'landmark' || S.city.demo || S.noTiles).forEach((p) => {
+      const e = el('div', 'mk-label', esc(p.name[S.lang] || p.name.ru));
+      markers.places.push(new ML.Marker({ element: e, anchor: 'bottom', offset: [0, -16] }).setLngLat([p.lon, p.lat]).addTo(map));
     });
   }
 
-  let lightKey = null, lightFx = null;
   function buildLayers(now) {
     const c = S.city, a = S.args, night = isNight();
     const sec = (now - S.t0) / 1000;
     const lk = night ? 'n' : 'd';
-    if (lightKey !== lk) { lightKey = lk; lightFx = [lighting()]; deckgl.setProps({ effects: lightFx }); }
-    const [s, w, n, e] = c.bbox;
-    const pad = 0.05;
+    const flat = !baseStyle || c.demo;
     const L = [];
-    L.push(new D.PolygonLayer({ id: 'ground', data: [[[w - pad, s - pad], [e + pad, s - pad], [e + pad, n + pad], [w - pad, n + pad]]], getPolygon: (d) => d, getFillColor: night ? [9, 14, 30] : [226, 236, 247], stroked: false, material: false, updateTriggers: { getFillColor: lk } }));
-    L.push(new D.PathLayer({ id: 'river', data: c.water.lines, getPath: (d) => d, getColor: night ? [22, 48, 92] : [150, 190, 230], getWidth: 85, widthUnits: 'meters', capRounded: true, jointRounded: true, updateTriggers: { getColor: lk } }));
-    L.push(new D.PathLayer({ id: 'river-ice', data: c.water.lines, getPath: (d) => d, getColor: night ? [70, 120, 180, 70] : [255, 255, 255, 150], getWidth: 48, widthUnits: 'meters', capRounded: true, jointRounded: true, updateTriggers: { getColor: lk } }));
-    L.push(new D.PolygonLayer({ id: 'lakes', data: c.water.polys, getPolygon: (d) => d, getFillColor: night ? [22, 48, 92] : [150, 190, 230], stroked: false, material: false, updateTriggers: { getFillColor: lk } }));
+    if (flat) {
+      L.push(new D.PathLayer({ id: 'river', data: c.water.lines, getPath: (d) => d, getColor: night ? [22, 48, 92] : [150, 190, 230], getWidth: 85, widthUnits: 'meters', capRounded: true, jointRounded: true, updateTriggers: { getColor: lk } }));
+      L.push(new D.PolygonLayer({ id: 'lakes', data: c.water.polys, getPolygon: (d) => d, getFillColor: night ? [22, 48, 92] : [150, 190, 230], stroked: false, updateTriggers: { getFillColor: lk } }));
+    }
     const rv = S.riskVersion + lk;
     L.push(new D.PathLayer({
-      id: 'risk-glow', data: c.edges, getPath: (d) => d.p, getColor: (d) => riskColor(S.risk[d.i] / 100, S.risk[d.i] > 42 ? (night ? 46 : 60) : 0),
-      getWidth: (d) => (d.b ? 30 : 20), widthUnits: 'meters', widthMinPixels: 3, capRounded: true, jointRounded: true,
-      updateTriggers: { getColor: rv }, transitions: { getColor: 700 }, parameters: { depthTest: false },
+      id: 'risk-glow', data: c.edges, getPath: (d) => d.p, getColor: (d) => riskColor(S.risk[d.i] / 100, S.risk[d.i] > 55 ? (night ? 60 : 55) : 0),
+      getWidth: (d) => (d.b ? 26 : 16), widthUnits: 'meters', widthMinPixels: 2, capRounded: true, jointRounded: true,
+      updateTriggers: { getColor: rv }, transitions: { getColor: 700 },
     }));
     L.push(new D.PathLayer({
-      id: 'risk', data: c.edges, getPath: (d) => d.p, getColor: (d) => riskColor(S.risk[d.i] / 100, night ? 215 : 235),
-      getWidth: (d) => (d.b ? 9 : 5), widthUnits: 'meters', widthMinPixels: 1.2, capRounded: true, jointRounded: true, pickable: false,
-      updateTriggers: { getColor: rv }, transitions: { getColor: 700 }, parameters: { depthTest: false },
+      id: 'risk', data: c.edges, getPath: (d) => d.p, getColor: (d) => riskColor(S.risk[d.i] / 100, night ? 225 : 215),
+      getWidth: (d) => (d.b ? 7 : 3.5), widthUnits: 'meters', widthMinPixels: 1.4, capRounded: true, jointRounded: true,
+      updateTriggers: { getColor: rv }, transitions: { getColor: 700 },
     }));
     L.push(new D.ScatterplotLayer({
-      id: 'warm', data: c.warm, getPosition: (d) => [d.lon, d.lat, 2], getRadius: (d) => (d.kind === 'mall' ? 60 : 22) * (1 + 0.25 * Math.sin(sec * 2.2 + d.lon * 9000)),
-      getFillColor: (d) => [255, 180, 107, d.kind === 'mall' ? 70 : 60], radiusUnits: 'meters', radiusMinPixels: 2, stroked: true, getLineColor: [255, 190, 120, 200], lineWidthMinPixels: 1,
-      updateTriggers: { getRadius: Math.floor(sec * 20) }, parameters: { depthTest: false },
+      id: 'warm', data: c.warm, getPosition: (d) => [d.lon, d.lat], getRadius: (d) => (d.kind === 'mall' ? 55 : 14) * (1 + 0.25 * Math.sin(sec * 2.2 + d.lon * 9000)),
+      getFillColor: (d) => [255, 180, 107, d.kind === 'mall' ? 75 : 110], radiusUnits: 'meters', radiusMinPixels: 2.5, stroked: true, getLineColor: [255, 190, 120, 220], lineWidthMinPixels: 1,
+      updateTriggers: { getRadius: Math.floor(sec * 20) },
     }));
-    L.push(new D.PolygonLayer({
-      id: 'buildings', data: c.buildings, getPolygon: (d) => d.p, extruded: true, getElevation: (d) => d.h, wireframe: false,
-      getFillColor: (d, { index }) => {
-        const k = Math.min(1, d.h / 90);
-        if (!night) return mix([222, 231, 243], [196, 210, 230], k).concat(255);
-        if (index % 9 === 0) return [48, 37, 36, 255];
-        return mix([17, 24, 48], [30, 44, 86], k).concat(255);
-      },
-      material: { ambient: 0.4, diffuse: 0.65, shininess: 24, specularColor: night ? [70, 90, 150] : [255, 255, 255] }, updateTriggers: { getFillColor: lk },
-    }));
-    const r = a.route;
+    const r = S.wantRoute ? a.route : null;
     if (r) {
       const waveK = Math.max(0, Math.min(1, (now - S.waveT0) / 900));
       const wave = (r.transit ? r.transit.wave : r.wave) || [];
       const fade = Math.max(0, 1 - Math.max(0, now - S.waveT0 - 900) / 1100);
       if (fade > 0) {
-        L.push(new D.ScatterplotLayer({
-          id: 'wave', data: wave.slice(0, Math.ceil(wave.length * waveK)), getPosition: (d) => [d[0], d[1], 3], getRadius: 5, radiusUnits: 'pixels',
-          getFillColor: [159, 227, 255, Math.round(190 * fade)], parameters: { depthTest: false },
-        }));
+        L.push(new D.ScatterplotLayer({ id: 'wave', data: wave.slice(0, Math.ceil(wave.length * waveK)), getPosition: (d) => d, getRadius: 5, radiusUnits: 'pixels', getFillColor: [159, 227, 255, Math.round(200 * fade)] }));
       }
       const drawK = Math.max(0, Math.min(1, (now - S.routeT0) / 1700));
       const shortLines = r.transit ? r.transit.short_legs : [r.short.line];
       const safeLines = r.transit ? r.transit.legs : [r.safe.line];
       L.push(new D.PathLayer({
-        id: 'short', data: shortLines, getPath: (d) => d, getColor: night ? [255, 255, 255, Math.round(170 * drawK)] : [40, 60, 100, Math.round(200 * drawK)], getWidth: 2.5, widthUnits: 'pixels',
-        getDashArray: [5, 4], dashJustified: true, extensions: [new D.PathStyleExtension({ dash: true })], parameters: { depthTest: false }, updateTriggers: { getColor: [drawK, lk] },
+        id: 'short', data: shortLines, getPath: (d) => d, getColor: night ? [255, 255, 255, Math.round(190 * drawK)] : [40, 60, 100, Math.round(210 * drawK)], getWidth: 3, widthUnits: 'pixels',
+        getDashArray: [5, 4], dashJustified: true, extensions: [new D.PathStyleExtension({ dash: true })], updateTriggers: { getColor: [drawK, lk] },
       }));
-      const trips = safeLines.map((line) => {
-        let acc = 0; const ts = [0];
-        for (let i = 1; i < line.length; i++) { acc += Math.hypot((line[i][0] - line[i - 1][0]) * 0.63, line[i][1] - line[i - 1][1]); ts.push(acc); }
-        return { path: line, ts: ts.map((v) => v / (acc || 1)) };
-      });
+      if (!S.trips || S.tripsFor !== r) {
+        S.tripsFor = r;
+        S.trips = safeLines.map((line) => {
+          let acc = 0; const ts = [0];
+          for (let i = 1; i < line.length; i++) { acc += Math.hypot((line[i][0] - line[i - 1][0]) * 0.63, line[i][1] - line[i - 1][1]); ts.push(acc); }
+          return { path: line, ts: ts.map((v) => v / (acc || 1)) };
+        });
+      }
+      const trips = S.trips;
       const col = night ? [159, 227, 255] : [14, 143, 163];
-      L.push(new D.TripsLayer({ id: 'safe-glow', data: trips, getPath: (d) => d.path, getTimestamps: (d) => d.ts, getColor: col, opacity: 0.22, widthMinPixels: 16, capRounded: true, jointRounded: true, trailLength: 2, fadeTrail: false, currentTime: drawK, parameters: { depthTest: false } }));
-      L.push(new D.TripsLayer({ id: 'safe', data: trips, getPath: (d) => d.path, getTimestamps: (d) => d.ts, getColor: night ? [225, 247, 255] : [14, 143, 163], opacity: 1, widthMinPixels: 5, capRounded: true, jointRounded: true, trailLength: 2, fadeTrail: false, currentTime: drawK, parameters: { depthTest: false } }));
+      L.push(new D.TripsLayer({ id: 'safe-glow', data: trips, getPath: (d) => d.path, getTimestamps: (d) => d.ts, getColor: col, opacity: 0.28, widthMinPixels: 18, capRounded: true, jointRounded: true, trailLength: 2, fadeTrail: false, currentTime: drawK }));
+      L.push(new D.TripsLayer({ id: 'safe', data: trips, getPath: (d) => d.path, getTimestamps: (d) => d.ts, getColor: night ? [225, 247, 255] : [14, 143, 163], opacity: 1, widthMinPixels: 6, capRounded: true, jointRounded: true, trailLength: 2, fadeTrail: false, currentTime: drawK }));
       if (drawK >= 1) {
-        L.push(new D.TripsLayer({ id: 'safe-pulse', data: trips, getPath: (d) => d.path, getTimestamps: (d) => d.ts, getColor: [255, 255, 255], opacity: 0.95, widthMinPixels: 7, capRounded: true, jointRounded: true, trailLength: 0.14, fadeTrail: true, currentTime: (sec * 0.32) % 1.2, parameters: { depthTest: false } }));
+        L.push(new D.TripsLayer({ id: 'safe-pulse', data: trips, getPath: (d) => d.path, getTimestamps: (d) => d.ts, getColor: [255, 255, 255], opacity: 0.95, widthMinPixels: 8, capRounded: true, jointRounded: true, trailLength: 0.14, fadeTrail: true, currentTime: (sec * 0.32) % 1.2 }));
       }
       if (r.transit) {
-        L.push(new D.ArcLayer({ id: 'ride', data: [r.transit.ride], getSourcePosition: (d) => d[0], getTargetPosition: (d) => d[1], getSourceColor: [159, 227, 255, Math.round(230 * drawK)], getTargetColor: [255, 180, 107, Math.round(230 * drawK)], getWidth: 4, getHeight: 0.28, greatCircle: false, updateTriggers: { getSourceColor: drawK, getTargetColor: drawK } }));
-        L.push(new D.ScatterplotLayer({ id: 'ride-stops', data: r.transit.stops, getPosition: (d) => [d.lon, d.lat, 4], getRadius: 7, radiusUnits: 'pixels', getFillColor: [10, 16, 38], stroked: true, getLineColor: [159, 227, 255], lineWidthMinPixels: 2.5, parameters: { depthTest: false } }));
+        L.push(new D.ArcLayer({ id: 'ride', data: [r.transit.ride], getSourcePosition: (d) => d[0], getTargetPosition: (d) => d[1], getSourceColor: [159, 227, 255, Math.round(240 * drawK)], getTargetColor: [255, 180, 107, Math.round(240 * drawK)], getWidth: 5, getHeight: 0.22, greatCircle: false, updateTriggers: { getSourceColor: drawK, getTargetColor: drawK } }));
+        L.push(new D.ScatterplotLayer({ id: 'ride-stops', data: r.transit.stops, getPosition: (d) => [d.lon, d.lat], getRadius: 7, radiusUnits: 'pixels', getFillColor: [10, 16, 38], stroked: true, getLineColor: [159, 227, 255], lineWidthMinPixels: 2.5 }));
       }
       if (r.bayes && r.bayes.at) {
         const pulse = 1 + 0.35 * Math.sin(sec * 3);
-        L.push(new D.ScatterplotLayer({ id: 'worst', data: [r.bayes.at], getPosition: (d) => [d[0], d[1], 5], getRadius: 16 * pulse, radiusUnits: 'pixels', filled: false, stroked: true, getLineColor: [255, 90, 95, 230], lineWidthMinPixels: 2, parameters: { depthTest: false }, updateTriggers: { getRadius: sec } }));
+        L.push(new D.ScatterplotLayer({ id: 'worst', data: [r.bayes.at], getPosition: (d) => d, getRadius: 16 * pulse, radiusUnits: 'pixels', filled: false, stroked: true, getLineColor: [255, 90, 95, 240], lineWidthMinPixels: 2.5, updateTriggers: { getRadius: sec } }));
       }
     }
-    const ends = [];
-    if (S.src) ends.push({ p: [S.src.lon, S.src.lat], c: [159, 227, 255] });
-    if (S.dst) ends.push({ p: [S.dst.lon, S.dst.lat], c: [255, 180, 107] });
-    L.push(new D.ScatterplotLayer({ id: 'ends-halo', data: ends, getPosition: (d) => [d.p[0], d.p[1], 6], getRadius: 20 + 4 * Math.sin(sec * 2.4), radiusUnits: 'pixels', getFillColor: (d) => d.c.concat(50), parameters: { depthTest: false }, updateTriggers: { getRadius: sec } }));
-    L.push(new D.ScatterplotLayer({ id: 'ends', data: ends, getPosition: (d) => [d.p[0], d.p[1], 6], getRadius: 8, radiusUnits: 'pixels', getFillColor: night ? [8, 13, 30] : [255, 255, 255], stroked: true, getLineColor: (d) => d.c, lineWidthMinPixels: 3.5, parameters: { depthTest: false }, updateTriggers: { getFillColor: lk } }));
     if (S.marks.length) {
       const mc = { ice: [255, 90, 95], packed: [255, 181, 71], dry: [75, 227, 160] };
-      L.push(new D.ScatterplotLayer({ id: 'marks', data: S.marks, getPosition: (d) => [d.lon, d.lat, 7], getRadius: 6, radiusUnits: 'pixels', getFillColor: (d) => mc[d.actual], stroked: true, getLineColor: [255, 255, 255], lineWidthMinPixels: 1.5, parameters: { depthTest: false } }));
+      L.push(new D.ScatterplotLayer({ id: 'marks', data: S.marks, getPosition: (d) => [d.lon, d.lat], getRadius: 6, radiusUnits: 'pixels', getFillColor: (d) => mc[d.actual], stroked: true, getLineColor: [255, 255, 255], lineWidthMinPixels: 1.5 }));
     }
-    const labels = a.places.map((p) => ({ p: [p.lon, p.lat], text: p.name[S.lang] || p.name.ru, big: p.kind !== 'landmark' }));
-    L.push(new D.TextLayer({
-      id: 'labels', data: labels, getPosition: (d) => [d.p[0], d.p[1], 60], getText: (d) => d.text, getSize: (d) => (d.big ? 13 : 12), fontFamily: 'Inter, system-ui, sans-serif', fontWeight: 600, characterSet: 'auto',
-      getColor: night ? [238, 243, 255] : [16, 27, 54], background: true, getBackgroundColor: night ? [12, 19, 42, 215] : [255, 255, 255, 225], backgroundPadding: [9, 5, 9, 5], getBorderColor: night ? [159, 227, 255, 90] : [20, 40, 80, 40], getBorderWidth: 1,
-      getPixelOffset: [0, -30], parameters: { depthTest: false }, updateTriggers: { getText: S.lang, getColor: lk, getBackgroundColor: lk, getBorderColor: lk }, fontSettings: { sdf: false, fontSize: 48, buffer: 6 },
-    }));
     return L;
   }
 
   function frame(now) {
     requestAnimationFrame(frame);
-    if (!deckgl || !S.city || !S.args || document.hidden) return;
-    deckgl.setProps({ layers: buildLayers(now) });
+    if (!overlay || !S.city || !S.args || document.hidden) return;
+    overlay.setProps({ layers: buildLayers(now) });
     drawSnow(now);
   }
 
@@ -210,7 +286,7 @@
     const target = !cold ? 0 : Math.round((40 + Math.min(1, wx.snow / 2) * 520 + Math.min(1, wx.wind / 18) * 160) * Math.min(1.4, (snow.w * snow.h) / 900000 + 0.45));
     while (snow.parts.length < target) snow.parts.push({ x: Math.random() * snow.w, y: Math.random() * snow.h, z: 0.35 + Math.random() * 0.65, ph: Math.random() * 6.28 });
     if (snow.parts.length > target) snow.parts.length = target;
-    const bearing = ((S.live && S.live.bearing) || 0) * Math.PI / 180;
+    const bearing = (map ? map.getBearing() : 0) * Math.PI / 180;
     const dir = Math.sin((wx.wdir + 180) * Math.PI / 180 - bearing);
     const vx = dir * wx.wind * 26 + (dir >= 0 ? 12 : -12), vy = 70 + wx.snow * 30 + wx.wind * 5;
     const streak = Math.min(1, Math.max(0, (wx.wind - 7) / 9));
@@ -263,12 +339,13 @@
     spark(wx);
     const h = a.hmm, top = h.now.indexOf(Math.max(...h.now)), sn = h.states[top];
     $('wx-state').innerHTML = '<i style="background:' + STATE_COL[sn] + '"></i>' + t('state_line', { s: '<b>' + t('st_' + sn) + '</b>', p: Math.round(h.now[top] * 100) });
-    const badge = S.city && S.city.demo ? t('demo') : wx.fallback ? t('wxfall') : '';
+    const badge = S.city && S.city.demo ? t('demo') : S.noTiles ? t('notiles') : wx.fallback ? t('wxfall') : '';
     $('badge').hidden = !badge; $('badge').textContent = badge;
     $('src-name').textContent = placeName(S.src); $('dst-name').textContent = placeName(S.dst);
     $('slot-src').classList.toggle('on', S.picking === 'src'); $('slot-dst').classList.toggle('on', S.picking === 'dst');
     if ($('sp-sub')) $('sp-sub').textContent = t('sp', { t: num(Math.round(now.temp)) });
     renderResult();
+    applyStyle(); syncMarkers();
     if (!$('brain').hidden) renderBrain();
     if (!$('marks').hidden) renderMarks();
   }
@@ -433,13 +510,9 @@
     const lines = r.transit ? r.transit.legs.concat([r.transit.ride]) : [r.safe.line, r.short.line];
     let x0 = 180, x1 = -180, y0 = 90, y1 = -90;
     lines.forEach((l) => l.forEach((p) => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }));
-    const mobile = window.innerWidth <= 760;
-    const W = window.innerWidth * (mobile ? 0.8 : 0.55), H = window.innerHeight * (mobile ? 0.34 : 0.6);
-    const zx = Math.log2((W * 360) / (512 * Math.max(0.002, x1 - x0))), zy = Math.log2((H * 360) / (512 * Math.max(0.002, (y1 - y0) * 1.6)));
-    const zoom = Math.max(11.8, Math.min(16.2, Math.min(zx, zy) - 0.1));
-    const span = 360 / Math.pow(2, zoom) / 512;
-    const cx = (x0 + x1) / 2 - (mobile ? 0 : span * 150), cy = (y0 + y1) / 2 - (mobile ? span * window.innerHeight * 0.13 : 0);
-    setView({ longitude: cx, latitude: cy, zoom, pitch: 44, bearing: 12, transitionDuration: 2200, transitionInterpolator: new D.FlyToInterpolator({ speed: 1.4 }) });
+    const mobile = window.innerWidth <= 760, H = window.innerHeight;
+    const padding = mobile ? { top: 150, bottom: Math.min(H * 0.55, H - 260), left: 30, right: 30 } : { top: 110, bottom: 70, left: 420, right: 70 };
+    try { map.fitBounds([[x0, y0], [x1, y1]], { padding, pitch: 48, bearing: 12, duration: 2200, maxZoom: 16.4 }); } catch (e) { map.fitBounds([[x0, y0], [x1, y1]], { duration: 1500 }); }
   }
 
   function startSplash() {
@@ -448,10 +521,10 @@
       if (S.splashDone) return; S.splashDone = true;
       sp.classList.add('out'); setTimeout(() => sp.remove(), 950);
       const c = S.args.places.find((p) => p.id === 'campus');
-      setView({ bearing: 25, transitionDuration: 2600, transitionInterpolator: new D.LinearInterpolator(['bearing']) });
-      setTimeout(() => { if (!S.args.route) setView({ longitude: c.lon - 0.004, latitude: c.lat + 0.003, zoom: 14.4, pitch: 60, bearing: 18, transitionDuration: 5200, transitionInterpolator: new D.FlyToInterpolator({ speed: 0.9 }) }); }, 2650);
+      map.easeTo({ bearing: 28, duration: 2600, easing: (x) => x });
+      setTimeout(() => { if (!(S.wantRoute && S.args.route)) map.flyTo({ center: [c.lon, c.lat], zoom: 15.3, pitch: 60, bearing: 18, duration: 5200, essential: true }); }, 2650);
     };
-    const quick = /[?&]quick/.test(location.search) || /[?&]quick/.test(document.referrer) || navigator.webdriver;
+    const quick = /[?&]quick/.test(location.search) || navigator.webdriver;
     sp.addEventListener('pointerdown', done);
     setTimeout(done, quick ? 50 : 3600);
   }
@@ -477,6 +550,9 @@
     $('place-list').hidden = true; S.picking = null;
     S.wantRoute = true; S.pendingRoute = true; S.routeKey = null; $('btn-go').classList.add('busy');
     send();
+    clearTimeout(S.retry1); clearTimeout(S.retry2);
+    S.retry1 = setTimeout(() => { if (S.pendingRoute) { toast(t('slow')); send(); } }, 9000);
+    S.retry2 = setTimeout(() => { if (S.pendingRoute) { S.pendingRoute = false; $('btn-go').classList.remove('busy'); toast(t('noanswer')); } }, 26000);
   };
   $('btn-why').onclick = () => { $('marks').hidden = true; $('brain').hidden = false; renderBrain(); };
   $('btn-brain').onclick = () => { const b = $('brain'); $('marks').hidden = true; b.hidden = !b.hidden; if (!b.hidden) renderBrain(); };
