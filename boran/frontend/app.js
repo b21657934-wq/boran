@@ -79,9 +79,9 @@
     day: {
       bg: '#F4F1EA', res: '#EFEBE3', block: '#ECE7DD', park: '#CDE6B1', wood: '#BCDDA0', pitch: '#C6E3AC', water: '#9ECDF4', waterLine: '#8EC3EF',
       road: '#FFFFFF', casing: '#DAD4C8', majorCasing: '#CBC3B5', path: '#E4DFD5', rail: '#C9C3B8', bld2d: '#E6E0D5', bldOutline: '#D3CCBF',
-      bld3d: '#EAE5DC', text: '#3D3D3D', poiText: '#666058', waterText: '#3C7DC0', halo: '#FFFFFF',
+      bld3d: '#F1ECE3', text: '#3D3D3D', poiText: '#666058', waterText: '#3C7DC0', halo: '#FFFFFF',
       risk: ['#2DBE80', '#F2A93B', '#E8414B'], route: '#1E88E5', routeCasing: '#FFFFFF', routeGlow: '#1E88E5', short: '#5E6B85', ride: '#F07A1A', wave: '#1E88E5', warm: '#F07A1A', worst: '#E8414B',
-      light: { anchor: 'viewport', color: '#FFFFFF', intensity: 0.42, position: [1.2, 200, 38] },
+      light: { anchor: 'viewport', color: '#FFF8EE', intensity: 0.3, position: [1.25, 195, 32] },
     },
     night: {
       bg: '#0A1022', res: '#0D152C', block: '#0E1630', park: '#10283A', wood: '#0F2A36', pitch: '#123044', water: '#123463', waterLine: '#1B4A85',
@@ -125,9 +125,9 @@
         } else if (sl === 'aeroway') p['line-color'] = P.casing;
       } else if (L.type === 'fill-extrusion') {
         p['fill-extrusion-color'] = P.bld3d;
-        p['fill-extrusion-opacity'] = 1;
         p['fill-extrusion-vertical-gradient'] = true;
-        L.minzoom = 13.4;
+        L.minzoom = 12.6;
+        p['fill-extrusion-opacity'] = ['interpolate', ['linear'], ['zoom'], 12.6, 0, 13.4, 1];
       } else if (L.type === 'symbol') {
         if (L.layout['text-field'] && /place|poi|transportation_name|water_name|waterway|aerodrome/.test(sl)) {
           L.layout['text-field'] = ['coalesce', ['get', nameKey], ['get', 'name:ru'], ['get', 'name'], ['get', 'name:latin']];
@@ -204,10 +204,12 @@
     });
     const riskColor = ['interpolate', ['linear'], ['get', 'r'], 20, P.risk[0], 50, P.risk[1], 80, P.risk[2]];
     const below = [
-      { id: 'b-risk-glow', type: 'line', source: 'b-risk', minzoom: 13, filter: ['>=', ['get', 'r'], 66], layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': riskColor, 'line-blur': 3, 'line-opacity': isNight() ? 0.45 : 0.3, 'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 13, 2, 16, 9, 18, 22] } },
-      { id: 'b-risk', type: 'line', source: 'b-risk', minzoom: 12.5, filter: ['any', ['==', ['get', 'b'], 1], ['>=', ['zoom'], 14.2]], layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': riskColor, 'line-opacity': ['interpolate', ['linear'], ['zoom'], 12.5, 0, 13.5, isNight() ? 0.9 : 0.85], 'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 13, ['case', ['==', ['get', 'b'], 1], 1.4, 0.7], 16, ['case', ['==', ['get', 'b'], 1], 3.4, 2.2], 18, ['case', ['==', ['get', 'b'], 1], 8, 5]] } },
+      { id: 'b-risk-glow', type: 'line', source: 'b-risk', minzoom: 13, filter: ['all', ['>=', ['get', 'r'], 80], ['==', ['get', 'b'], 1]], layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': riskColor, 'line-blur': 4, 'line-opacity': isNight() ? 0.4 : 0.22, 'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 13, 3, 16, 10, 18, 24] } },
+      { id: 'b-risk', type: 'line', source: 'b-risk', minzoom: 12.5, filter: ['any', ['==', ['get', 'b'], 1], ['>=', ['zoom'], 14.6]], layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': riskColor,
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 12.5, 0, 13.5, ['case', ['==', ['get', 'b'], 1], 0.85, 0.5], 16, ['case', ['==', ['get', 'b'], 1], 0.85, 0.62]],
+          'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 13, ['case', ['==', ['get', 'b'], 1], 1.2, 0.5], 16, ['case', ['==', ['get', 'b'], 1], 2.6, 1.3], 18, ['case', ['==', ['get', 'b'], 1], 6, 3.2]] } },
       { id: 'b-warm', type: 'circle', source: 'b-warm', minzoom: 13,
         paint: { 'circle-color': P.warm, 'circle-opacity': 0.18, 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, ['case', ['==', ['get', 'k'], 'mall'], 6, 2], 17, ['case', ['==', ['get', 'k'], 'mall'], 26, 9]], 'circle-stroke-color': P.warm, 'circle-stroke-width': 1.2, 'circle-stroke-opacity': 0.8, 'circle-pitch-alignment': 'map' } },
       { id: 'b-short', type: 'line', source: 'b-short', layout: { 'line-cap': 'round', 'line-join': 'round' },
@@ -231,8 +233,10 @@
     const lmAt = ext >= 0 ? ext + 1 : (sym < 0 ? st.layers.length : sym);
     st.layers.splice(lmAt, 0,
       { id: 'b-landmarks', type: 'fill-extrusion', source: 'b-landmarks', minzoom: 12.5, paint: { 'fill-extrusion-color': ['get', 'color'], 'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1, 'fill-extrusion-vertical-gradient': true } },
-      { id: 'b-ride', type: 'line', source: 'b-ride', layout: { 'line-cap': 'round' },
-        paint: { 'line-color': P.ride, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 17, 5], 'line-dasharray': [0.6, 1.4], 'line-opacity': 0 } });
+      { id: 'b-ride-casing', type: 'line', source: 'b-ride', layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': P.routeCasing, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 6, 17, 12], 'line-opacity': 0 } },
+      { id: 'b-ride', type: 'line', source: 'b-ride', layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': P.ride, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3.5, 17, 7], 'line-opacity': 0 } });
     return st;
   }
 
@@ -248,8 +252,16 @@
       st.layers.push({ id: 'city-water-fill', type: 'fill', source: 'city_water', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': P.water } });
       st.layers.push({ id: 'city-water-line', type: 'line', source: 'city_water', filter: ['==', ['geometry-type'], 'LineString'], paint: { 'line-color': P.water, 'line-width': ['interpolate', ['exponential', 2], ['zoom'], 11, 4, 16, 90] } });
     }
-    map.setStyle(addOverlay(st), { diff: false });
+    const full = addOverlay(st);
+    S.styleTry = (S.styleTry || 0) + 1;
+    const attempt = S.styleTry;
+    map.setStyle(full, { diff: false });
     map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; pushRoute(true); pushMarks(); });
+    setTimeout(() => {
+      if (attempt !== S.styleTry || (map.getStyle() && map.getLayer('b-risk'))) return;
+      if (attempt > 3) return;
+      styleKey = null; applyStyle();
+    }, 5000);
   }
 
   const VIEW0 = { center: [71.4305, 51.1283], zoom: 15.4, pitch: 58, bearing: -28 };
@@ -260,7 +272,7 @@
       container: 'map', style: flatStyle(isNight()), center: VIEW0.center, zoom: VIEW0.zoom, pitch: VIEW0.pitch, bearing: VIEW0.bearing,
       maxPitch: 70, minZoom: 10.5, maxZoom: 18.5, attributionControl: false, maxBounds: [[w - 0.25, s - 0.15], [e + 0.25, n + 0.15]], antialias: true,
     });
-    map.addControl(new ML.AttributionControl({ compact: true, customAttribution: 'OpenFreeMap © OpenMapTiles · © OpenStreetMap' }), 'bottom-right');
+    map.addControl(new ML.AttributionControl({ compact: true }), 'bottom-right');
     map.on('click', (ev) => onMapClick({ coordinate: [ev.lngLat.lng, ev.lngLat.lat], x: ev.point.x, y: ev.point.y }));
     map.on('error', (ev) => { if (ev && ev.error && /style|layers\[/.test(String(ev.error.message))) console.warn(ev.error.message); });
     window.__map = map;
@@ -352,6 +364,7 @@
       setPaint('b-route-glow', 'line-opacity', (isNight() ? 0.55 : 0.28) * k);
       setPaint('b-short', 'line-opacity', 0.85 * k);
       setPaint('b-ride', 'line-opacity', 0.95 * k);
+      setPaint('b-ride-casing', 'line-opacity', 0.95 * k);
     }
     if (k >= 1 && S.safeLines) {
       const sec = now / 1000;
@@ -609,7 +622,8 @@
     lines.forEach((l) => l.forEach((p) => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }));
     const mobile = window.innerWidth <= 760, H = window.innerHeight;
     const padding = mobile ? { top: 150, bottom: Math.min(H * 0.55, H - 260), left: 30, right: 30 } : { top: 110, bottom: 70, left: 420, right: 70 };
-    try { map.fitBounds([[x0, y0], [x1, y1]], { padding, pitch: 48, bearing: 12, duration: 2200, maxZoom: 16.4 }); } catch (e) { map.fitBounds([[x0, y0], [x1, y1]], { duration: 1500 }); }
+    const cam = map.cameraForBounds([[x0, y0], [x1, y1]], { padding, maxZoom: 16.4, bearing: -12 });
+    if (cam) map.flyTo({ center: cam.center, zoom: Math.min(16.4, cam.zoom + 0.35), bearing: -12, pitch: 50, duration: 2400, essential: true });
   }
 
   function startSplash() {

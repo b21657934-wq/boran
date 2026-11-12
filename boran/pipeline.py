@@ -18,6 +18,18 @@ def _leg(city, a, b, an, safe=True):
     return res, astar.describe(city, res, an["risks"], an["wind_k"])
 
 
+ROADS = {"primary", "secondary", "tertiary", "unclassified", "residential", "living_street"}
+
+
+def _bus_path(city, an, a, b):
+    for allowed in (lambda ed: ed["hw"] in ROADS, None):
+        res = astar.search(city, a, b, an["risks"], an["wind_k"], safe=False, allow=allowed)
+        if res is not None:
+            line = astar.describe(city, res, an["risks"], an["wind_k"])
+            return line["line"], line["length"]
+    return None, None
+
+
 def _wave(city, res, cap=900):
     order = res["order"]
     step = max(1, len(order) // cap)
@@ -70,7 +82,10 @@ def route(city, an, weather, src, dst):
         if best:
             _, sa, sb, ra, da, rb, db, na, nb = best
             A, B = city.stops[sa], city.stops[sb]
-            ride_m = haversine(A["lon"], A["lat"], B["lon"], B["lat"]) * 1.3
+            ride_line, ride_m = _bus_path(city, an, na, nb)
+            if ride_line is None:
+                ride_line = [[A["lon"], A["lat"]], [B["lon"], B["lat"]]]
+                ride_m = haversine(A["lon"], A["lat"], B["lon"], B["lat"]) * 1.3
             ride_min = ride_m / config.TRANSIT_SPEED / 60.0
             _, sda = _leg(city, a, na, an, False)
             _, sdb = _leg(city, nb, b, an, False)
@@ -78,7 +93,7 @@ def route(city, an, weather, src, dst):
             transit = {
                 "legs": [da["line"], db["line"]],
                 "short_legs": [sda["line"], sdb["line"]],
-                "ride": [[A["lon"], A["lat"]], [B["lon"], B["lat"]]],
+                "ride": ride_line,
                 "stops": [A, B],
                 "walk": walk,
                 "short_walk": _merge([sda, sdb]),
