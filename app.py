@@ -26,8 +26,17 @@ iframe[title*="boran_map"] {position: fixed !important; inset: 0 !important; wid
 )
 
 
-@st.cache_resource(show_spinner=False)
-def load_city():
+def data_signature():
+    path = graph.data_path()
+    try:
+        stt = os.stat(path)
+        return f"{int(stt.st_mtime)}-{stt.st_size}"
+    except OSError:
+        return "demo"
+
+
+@st.cache_resource(show_spinner=False, max_entries=2)
+def load_city(signature):
     city = graph.get_city()
     blob = json.dumps(city.frontend(), ensure_ascii=False, separators=(",", ":"))
     version = hashlib.md5(blob.encode("utf-8")).hexdigest()[:10]
@@ -46,13 +55,13 @@ def load_weather(name):
 
 
 @st.cache_data(ttl=600, show_spinner=False, max_entries=8)
-def analyse(name, stamp):
-    return pipeline.analyse(load_city()[0], load_weather(name))
+def analyse(name, stamp, signature):
+    return pipeline.analyse(load_city(signature)[0], load_weather(name))
 
 
 @st.cache_data(ttl=600, show_spinner=False, max_entries=64)
-def find_route(name, stamp, src, dst):
-    return pipeline.route(load_city()[0], analyse(name, stamp), load_weather(name), src, dst)
+def find_route(name, stamp, signature, src, dst):
+    return pipeline.route(load_city(signature)[0], analyse(name, stamp, signature), load_weather(name), src, dst)
 
 
 loading = st.empty()
@@ -61,7 +70,7 @@ loading.markdown(
     'font:600 14px system-ui;letter-spacing:.3em;text-transform:uppercase;z-index:5">БОРАН · загружаю карту Астаны…</div>',
     unsafe_allow_html=True,
 )
-city, version, inline_city = load_city()
+city, version, inline_city = load_city(data_signature())
 loading.empty()
 state = st.session_state.get("boran") or {}
 scenario = state.get("scenario", "live")
@@ -69,14 +78,15 @@ if scenario != "live" and scenario not in weather.SCENARIOS:
     scenario = "live"
 wx = load_weather(scenario)
 stamp = f'{wx["date"]}{wx["now"]["time"]}{wx["source"]}'
-an = analyse(scenario, stamp)
+sig = data_signature()
+an = analyse(scenario, stamp, sig)
 
 route = None
 error = None
 src, dst = state.get("src"), state.get("dst")
 if src and dst:
     try:
-        route = find_route(scenario, stamp, (round(src[0], 5), round(src[1], 5)), (round(dst[0], 5), round(dst[1], 5)))
+        route = find_route(scenario, stamp, sig, (round(src[0], 5), round(src[1], 5)), (round(dst[0], 5), round(dst[1], 5)))
         if route is None:
             error = "no_path"
     except Exception as exc:
