@@ -101,3 +101,32 @@ def test_full_pipeline_on_demo_city():
     near = pipeline.route(city, an, wx, (71.417377, 51.089187), (71.4305, 51.1003))
     assert near["mode"] == "walk" and near["safe"]["length"] >= near["short"]["length"]
     assert near["safe"]["fall"] <= near["short"]["fall"] + 1e-9
+
+
+def test_search_family_on_toy_graph():
+    from boran import search
+    city = toy_city()
+    risks = [0.9, 0.9, 0.05, 0.05, 0.05]
+    an = {"risks": risks, "wind_k": 0.0}
+    res = {r["algo"]: r for r in search.compare(city, an, 0, 2)}
+    assert all(r["found"] for r in res.values())
+    assert res["bfs"]["steps"] == 2
+    assert res["ucs"]["steps"] == 3 and res["astar"]["steps"] == 3
+    assert abs(res["ucs"]["cost"] - res["astar"]["cost"]) < 1e-9
+    assert res["astar"]["best_cost"] and res["ucs"]["best_cost"]
+    assert res["astar"]["expanded"] <= res["ucs"]["expanded"]
+
+
+def test_ucs_equals_astar_on_real_shape_graph():
+    from boran import search
+    city = graph.City(graph.build(demo.raw(), demo=True))
+    an = pipeline.analyse(city, weather.scenario("thaw_freeze"))
+    a = city.nearest_node(71.417377, 51.089187)
+    b = city.nearest_node(71.4305, 51.1283)
+    u = search.ucs(city, a, b, an["risks"], an["wind_k"])
+    s = astar.search(city, a, b, an["risks"], an["wind_k"], safe=True)
+    assert abs(u["cost"] - s["cost"]) < 1e-6
+    assert len(s["order"]) <= len(u["order"])
+    bf = search.bfs(city, a, b, an["risks"], an["wind_k"])
+    d = search.dfs(city, a, b, an["risks"], an["wind_k"])
+    assert len(bf["edges"]) <= len(d["edges"])

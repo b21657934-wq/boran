@@ -1,4 +1,4 @@
-from . import astar, bayes, config, hmm, mdp
+from . import astar, bayes, config, hmm, mdp, search
 from .geo import haversine
 
 
@@ -129,3 +129,9 @@ def route(city, an, weather, src, dst):
            "access_risk": arisk, "cold_factor": cf}
     out["mdp"] = mdp.solve(inp, mdp.level(sev), trend)
     return out
+
+
+def compare(city, an, src, dst):
+    a = city.nearest_node(*src)
+    b = city.nearest_node(*dst)
+    return {"src": list(src), "dst": list(dst), "results": search.compare(city, an, a, b)}

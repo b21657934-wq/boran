@@ -25,7 +25,7 @@
     S.n += 1;
     post('streamlit:setComponentValue', {
       dataType: 'json',
-      value: { n: S.n, scenario: S.scenario || 'live', src: S.wantRoute && S.src ? [S.src.lon, S.src.lat] : null, dst: S.wantRoute && S.dst ? [S.dst.lon, S.dst.lat] : null },
+      value: { n: S.n, scenario: S.scenario || 'live', src: S.wantRoute && S.src ? [S.src.lon, S.src.lat] : null, dst: S.wantRoute && S.dst ? [S.dst.lon, S.dst.lat] : null, cmp: !!(S.wantCompare && S.wantRoute) },
     });
   }
   window.addEventListener('message', (e) => { if (e.data && e.data.type === 'streamlit:render') onRender(e.data.args.payload); });
@@ -58,6 +58,10 @@
     }
     if (!S.pendingRoute || args.ack >= S.n) { S.pendingRoute = false; $('btn-go').classList.remove('busy'); }
     if (args.error && S.wantRoute) toast(args.error === 'no_path' ? t('nopath') : t('err') + ' ' + args.error);
+    if (args.compare && S.wantCompare && S.src && S.dst) {
+      const same = args.compare.src[0].toFixed(4) === S.src.lon.toFixed(4) && args.compare.dst[0].toFixed(4) === S.dst.lon.toFixed(4);
+      if (same && S.cmp !== args.compare) { S.cmp = args.compare; S.cmpPending = false; if (!$('algos').hidden) { renderAlgos(); pushCompare(); } }
+    }
     if (first) startSplash();
   }
 
@@ -201,6 +205,8 @@
       'b-warm': { type: 'geojson', data: FC(S.city.warm.map((w) => ({ type: 'Feature', properties: { k: w.kind }, geometry: { type: 'Point', coordinates: [w.lon, w.lat] } }))) },
       'b-marks': { type: 'geojson', data: FC() },
       'b-landmarks': { type: 'geojson', data: landmarkFeatures() },
+      'b-cmp': { type: 'geojson', data: FC() },
+      'b-cmp-wave': { type: 'geojson', data: FC() },
     });
     const riskColor = ['interpolate', ['linear'], ['get', 'r'], 20, P.risk[0], 50, P.risk[1], 80, P.risk[2]];
     const below = [
@@ -224,6 +230,10 @@
       { id: 'b-points', type: 'circle', source: 'b-points', paint: {
         'circle-radius': ['case', ['==', ['get', 'k'], 'worst'], 14, 6], 'circle-color': ['case', ['==', ['get', 'k'], 'worst'], 'rgba(0,0,0,0)', isNight() ? '#0A1022' : '#FFFFFF'],
         'circle-stroke-color': ['case', ['==', ['get', 'k'], 'worst'], P.worst, P.ride], 'circle-stroke-width': ['case', ['==', ['get', 'k'], 'worst'], 2.5, 3], 'circle-pitch-alignment': 'map' } },
+      { id: 'b-cmp-wave', type: 'circle', source: 'b-cmp-wave', paint: { 'circle-color': '#1E88E5', 'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 1.6, 16, 3.5], 'circle-opacity': 0.55, 'circle-pitch-alignment': 'map' } },
+      { id: 'b-cmp-casing', type: 'line', source: 'b-cmp', filter: ['==', ['get', 'sel'], 1], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': P.routeCasing, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 7, 17, 14] } },
+      { id: 'b-cmp', type: 'line', source: 'b-cmp', layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': ['get', 'c'], 'line-opacity': ['case', ['==', ['get', 'sel'], 1], 1, 0.45], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, ['case', ['==', ['get', 'sel'], 1], 4, 2], 17, ['case', ['==', ['get', 'sel'], 1], 9, 3.5]] } },
       { id: 'b-runner', type: 'circle', source: 'b-runner', paint: { 'circle-radius': 6, 'circle-color': '#FFFFFF', 'circle-stroke-color': P.route, 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' } },
       { id: 'b-marks', type: 'circle', source: 'b-marks', paint: { 'circle-radius': 6, 'circle-color': ['match', ['get', 'a'], 'ice', P.risk[2], 'packed', P.risk[1], P.risk[0]], 'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 1.5 } },
     ];
@@ -256,7 +266,7 @@
     S.styleTry = (S.styleTry || 0) + 1;
     const attempt = S.styleTry;
     map.setStyle(full, { diff: false });
-    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; pushRoute(true); pushMarks(); });
+    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; pushRoute(true); pushMarks(); pushCompare(); });
     setTimeout(() => {
       if (attempt !== S.styleTry || (map.getStyle() && map.getLayer('b-risk'))) return;
       if (attempt > 3) return;
@@ -363,8 +373,7 @@
       const tr = 'rgba(0,0,0,0)';
       setPaint('b-route', 'line-gradient', k >= 1 ? ['step', ['line-progress'], P.route, 2, P.route] : ['step', ['line-progress'], P.route, Math.max(0.0001, k), tr]);
       setPaint('b-route-casing', 'line-gradient', k >= 1 ? ['step', ['line-progress'], P.routeCasing, 2, P.routeCasing] : ['step', ['line-progress'], P.routeCasing, Math.max(0.0001, k), tr]);
-      setPaint('b-route-glow', 'line-opacity', (isNight() ? 0.55 : 0.28) * k);
-      setPaint('b-short', 'line-opacity', 0.85 * k);
+      if (!S.cmpOpen) { setPaint('b-route-glow', 'line-opacity', (isNight() ? 0.55 : 0.28) * k); setPaint('b-short', 'line-opacity', 0.85 * k); }
       setPaint('b-ride', 'line-opacity', 0.95 * k);
       setPaint('b-ride-casing', 'line-opacity', 0.95 * k);
     }
@@ -378,7 +387,7 @@
   function frame(now) {
     requestAnimationFrame(frame);
     if (!map || !S.city || !S.args || document.hidden) return;
-    if (now - (S.lastAnim || 0) > 33) { S.lastAnim = now; animate(now); }
+    if (now - (S.lastAnim || 0) > 33) { S.lastAnim = now; animate(now); animateCompare(now); }
     drawSnow(now);
   }
 
@@ -460,6 +469,8 @@
     applyStyle(); syncMarkers(); pushRoute(false);
     if (!$('brain').hidden) renderBrain();
     if (!$('marks').hidden) renderMarks();
+    if (!$('algos').hidden) renderAlgos();
+    $('btn-locate').setAttribute('aria-label', t('geo_me'));
   }
 
   function spark(wx) {
@@ -509,6 +520,7 @@
     grid.innerHTML = cell('', t('safe') + (r.transit ? ' · ' + t('walk') : ''), A) + cell('s', t('short') + (r.transit ? ' · ' + t('walk') : ''), B);
     cmp.append(grid);
     if (r.transit) cmp.append(el('div', 'note', t('t_note')));
+    $('btn-cmp').innerHTML = t('cmp_btn') + ' <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>';
     $('btn-why').innerHTML = t('how') + ' <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>';
   }
 
@@ -548,7 +560,7 @@
         ['in', t('s3in', { n: nn.size, e: S.city.edges.length })],
         ['calc', t('s3calc', { a: a.params.alpha, b: num(a.params.beta * a.wind_k, 2) })],
         ['out', '<b>' + t('s3out', { x, y: r.expanded_short }) + '</b>'],
-      ]) + '<p class="say">' + t('s3say') + '</p>');
+      ]) + '<p class="say">' + t('s3say') + '</p><button class="btn2" id="brain-cmp" style="margin-top:10px">' + t('brain_cmp') + '</button>');
       const m = r.mdp, acts = ['go', 'wait', 'transit'];
       let tb = '<table class="q"><tr><th></th>' + acts.map((x) => '<th>' + t('ac_' + x) + '</th>').join('') + '</tr>';
       ['calm', 'snow', 'blizzard'].forEach((lv) => {
@@ -566,6 +578,7 @@
       html += step(4, t('s4'), t('s4a'), '<p class="empty">' + t('s3empty') + '</p>');
     }
     body.innerHTML = html + '<p class="assume">' + t('assume') + '</p>';
+    const bc = $('brain-cmp'); if (bc) bc.onclick = () => openAlgos();
   }
 
   function predictAt(lon, lat) {
@@ -599,9 +612,8 @@
     const [s, w, n, e] = S.city.bbox;
     if (lon < w || lon > e || lat < s || lat > n) return;
     if (S.picking) {
-      S[S.picking] = { lon: +lon.toFixed(5), lat: +lat.toFixed(5) };
-      S.picking = null; S.wantRoute = false; $('place-list').hidden = true;
-      renderAll(); return;
+      const which = S.picking; S.picking = null;
+      choose(which, { lon: +lon.toFixed(5), lat: +lat.toFixed(5) }); return;
     }
     if (S.markMode) {
       const pop = $('mark-pop');
@@ -642,40 +654,175 @@
     setTimeout(done, quick ? 50 : 3600);
   }
 
+  const ALGO_COL = { bfs: '#7C4DFF', dfs: '#FF6D00', ucs: '#00A389', greedy: '#E6A700', astar: '#1E88E5' };
+  const ALGO_NAME = { bfs: 'BFS', dfs: 'DFS', ucs: 'UCS', greedy: 'Greedy', astar: 'A*' };
+  const inBox = (lon, lat) => { const [s, w, n, e] = S.city.bbox; return lon >= w && lon <= e && lat >= s && lat <= n; };
+
+  function pushCompare() {
+    if (!map || !src('b-cmp')) return;
+    const c = S.cmpOpen && S.cmp ? S.cmp : null;
+    if (!c) { src('b-cmp').setData(FC()); src('b-cmp-wave').setData(FC()); setRouteDim(false); return; }
+    const feats = c.results.filter((r) => r.found).map((r) => ({ type: 'Feature', properties: { a: r.algo, sel: r.algo === S.cmpSel ? 1 : 0, c: ALGO_COL[r.algo] }, geometry: { type: 'LineString', coordinates: r.line } }));
+    feats.sort((a, b) => a.properties.sel - b.properties.sel);
+    src('b-cmp').setData(FC(feats));
+    setRouteDim(true);
+    S.cmpWaveT0 = performance.now(); S.cmpWaveN = -1;
+  }
+  function setRouteDim(on) {
+    ['b-route', 'b-route-casing'].forEach((id) => setPaint(id, 'line-opacity', on ? 0.18 : 1));
+    setPaint('b-route-glow', 'line-opacity', on ? 0 : (isNight() ? 0.55 : 0.28));
+    setPaint('b-short', 'line-opacity', on ? 0 : 0.85);
+    setPaint('b-runner', 'circle-opacity', on ? 0 : 1);
+    setPaint('b-runner', 'circle-stroke-opacity', on ? 0 : 1);
+  }
+  function animateCompare(now) {
+    if (!S.cmpOpen || !S.cmp || !src('b-cmp-wave')) return;
+    const r = S.cmp.results.find((x) => x.algo === S.cmpSel);
+    if (!r || !r.found) return;
+    const k = Math.min(1, (now - S.cmpWaveT0) / 1600);
+    const n = Math.ceil(r.wave.length * k);
+    if (n !== S.cmpWaveN) {
+      S.cmpWaveN = n;
+      src('b-cmp-wave').setData(FC(r.wave.slice(0, n).map((p) => ({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: p } }))));
+      setPaint('b-cmp-wave', 'circle-color', ALGO_COL[S.cmpSel]);
+    }
+  }
+
+  function renderAlgos() {
+    const body = $('algos-body');
+    $('t-algos-title').textContent = t('cmp_title');
+    const c = S.cmp;
+    if (!c) { body.innerHTML = '<p class="empty">' + (S.cmpPending ? t('cmp_wait') : t('cmp_need')) + '</p>'; return; }
+    const res = c.results;
+    const maxExp = Math.max(...res.filter((r) => r.found).map((r) => r.expanded));
+    let html = '<p class="cmp-intro">' + t('cmp_intro') + '</p><div class="algo-list">';
+    for (const r of res) {
+      const sel = r.algo === S.cmpSel;
+      html += '<button class="algo' + (sel ? ' sel' : '') + '" data-a="' + r.algo + '" style="--c:' + ALGO_COL[r.algo] + '">'
+        + '<div class="algo-h"><i></i><b>' + ALGO_NAME[r.algo] + '</b><span>' + t('al_' + r.algo) + '</span>' + (r.best_cost ? '<em>' + t('cmp_opt') + '</em>' : '') + '</div>';
+      if (!r.found) { html += '<div class="algo-m">' + t('cmp_nf') + '</div></button>'; continue; }
+      html += '<div class="algo-bar"><i style="width:' + Math.max(2, (r.expanded / maxExp) * 100).toFixed(1) + '%"></i></div>'
+        + '<div class="algo-m"><span><b>' + r.expanded.toLocaleString('ru') + '</b> ' + t('cmp_exp') + '</span><span><b>' + num(r.length / 1000, 1) + '</b> ' + t('km') + '</span><span>' + t('risk') + ' <b>' + num(r.fall * 100, 1) + '%</b></span><span><b>' + num(r.ms, 1) + '</b> ' + t('ms_') + '</span></div>'
+        + (sel ? '<p class="algo-why">' + t('aw_' + r.algo) + '</p>' : '') + '</button>';
+    }
+    html += '</div><p class="assume">' + t('cmp_note') + '</p>';
+    body.innerHTML = html;
+    body.querySelectorAll('.algo').forEach((b) => { b.onclick = () => { S.cmpSel = b.dataset.a; renderAlgos(); pushCompare(); }; });
+  }
+
+  function openAlgos() {
+    if (!S.src || !S.dst) { toast(t('need')); return; }
+    $('brain').hidden = true; $('marks').hidden = true; $('algos').hidden = false;
+    S.cmpOpen = true; S.cmpSel = S.cmpSel || 'astar';
+    const key = JSON.stringify([S.src.lon, S.src.lat, S.dst.lon, S.dst.lat, S.scenario]);
+    if (!S.cmp || S.cmpKey !== key) {
+      S.cmp = null; S.cmpKey = key; S.cmpPending = true; S.wantCompare = true;
+      if (!S.wantRoute) S.wantRoute = true;
+      renderAlgos(); send();
+    } else { renderAlgos(); pushCompare(); }
+    if (window.innerWidth <= 760) $('panel').classList.add('min');
+  }
+  function closeAlgos() { $('algos').hidden = true; S.cmpOpen = false; pushCompare(); }
+
+  let geoTimer = null;
+  async function geocode(q) {
+    const [s, w, n, e] = S.city.bbox;
+    const local = [];
+    const ql = q.toLowerCase();
+    S.args.places.forEach((p) => { const nm = p.name[S.lang] || p.name.ru; if (nm.toLowerCase().includes(ql)) local.push({ name: nm, sub: '', lon: p.lon, lat: p.lat, id: p.id }); });
+    S.city.warm.forEach((m) => { if (m.name && m.name.toLowerCase().includes(ql)) local.push({ name: m.name, sub: m.kind === 'mall' ? t('mall') : t('cafe'), lon: m.lon, lat: m.lat }); });
+    S.city.stops.forEach((m) => { if (m.name && m.name.toLowerCase().includes(ql)) local.push({ name: m.name, sub: t('stop'), lon: m.lon, lat: m.lat }); });
+    let remote = [];
+    try {
+      const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&bounded=1&accept-language=' + (S.lang === 'en' ? 'en' : S.lang === 'kk' ? 'kk,ru' : 'ru') + '&viewbox=' + [w, n, e, s].join(',') + '&q=' + encodeURIComponent(q);
+      const js = await fetch(url, { headers: { 'Accept': 'application/json' } }).then((r) => r.json());
+      remote = js.map((x) => ({ name: x.name || x.display_name.split(',')[0], sub: x.display_name.split(',').slice(1, 3).join(',').trim(), lon: +x.lon, lat: +x.lat })).filter((x) => inBox(x.lon, x.lat));
+    } catch (err) { remote = []; }
+    const seen = new Set(), out = [];
+    for (const r of local.slice(0, 6).concat(remote)) { const k = r.name + '|' + r.lon.toFixed(3) + r.lat.toFixed(3); if (!seen.has(k)) { seen.add(k); out.push(r); } }
+    return out.slice(0, 10);
+  }
+
+  function choose(which, p) {
+    S[which] = p; S.wantRoute = false; S.cmp = null;
+    $('place-list').hidden = true; renderAll();
+    if (map) map.flyTo({ center: [p.lon, p.lat], zoom: Math.max(map.getZoom(), 15), duration: 1200 });
+    if (S.src && S.dst) setTimeout(() => $('btn-go').click(), 250);
+  }
+
+  let userMarker = null;
+  function locate(which) {
+    if (!navigator.geolocation) { toast(t('geo_no')); return; }
+    toast(t('geo_wait'));
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const lon = +pos.coords.longitude.toFixed(5), lat = +pos.coords.latitude.toFixed(5);
+      if (!userMarker) userMarker = new ML.Marker({ element: el('div', 'me', '<i></i>') }).setLngLat([lon, lat]).addTo(map);
+      else userMarker.setLngLat([lon, lat]);
+      if (!inBox(lon, lat)) { toast(t('geo_out')); map.flyTo({ center: [lon, lat], zoom: 13, duration: 1500 }); return; }
+      choose(which || 'src', { lon, lat, label: t('geo_me') });
+    }, (err) => { toast(err && err.code === 1 ? t('geo_denied') : t('geo_fail')); }, { enableHighAccuracy: true, timeout: 12000, maximumAge: 30000 });
+  }
+
   function openPlaces(which) {
     S.picking = null;
     const box = $('place-list');
     if (!box.hidden && box.dataset.which === which) { box.hidden = true; renderAll(); return; }
     box.dataset.which = which; box.innerHTML = ''; box.hidden = false;
+    const input = el('input', 'place-q'); input.type = 'search'; input.placeholder = t('search_ph'); input.setAttribute('aria-label', t('search_ph'));
+    const list = el('div', 'place-res');
+    box.append(input, list);
     const icon = { campus: '🎓', dorm: '🏠', landmark: '★', mall: '🛍' };
-    const add = (ic, name, sub, fn) => { const b = el('button', '', '<i>' + ic + '</i><span>' + esc(name) + '</span>' + (sub ? '<small>' + esc(sub) + '</small>' : '')); b.onclick = fn; box.append(b); };
-    add('⌖', t('pick'), '', () => { S.picking = which; box.hidden = true; toast(t('tap')); renderAll(); });
-    S.args.places.forEach((p) => add(icon[p.kind] || '•', p.name[S.lang] || p.name.ru, '', () => { S[which] = { id: p.id, lon: p.lon, lat: p.lat }; S.wantRoute = false; box.hidden = true; renderAll(); }));
-    S.city.warm.filter((x) => x.kind === 'mall' && x.name).slice(0, 8).forEach((m) => add(icon.mall, m.name, t('mall'), () => { S[which] = { lon: m.lon, lat: m.lat, label: m.name }; S.wantRoute = false; box.hidden = true; renderAll(); }));
+    const add = (ic, name, sub, fn) => { const b = el('button', '', '<i>' + ic + '</i><span>' + esc(name) + '</span>' + (sub ? '<small>' + esc(sub) + '</small>' : '')); b.onclick = fn; list.append(b); };
+    const defaults = () => {
+      list.innerHTML = '';
+      add('◎', t('geo_me'), '', () => locate(which));
+      add('⌖', t('pick'), '', () => { S.picking = which; box.hidden = true; toast(t('tap')); renderAll(); });
+      S.args.places.forEach((p) => add(icon[p.kind] || '•', p.name[S.lang] || p.name.ru, '', () => choose(which, { id: p.id, lon: p.lon, lat: p.lat })));
+      S.city.warm.filter((x) => x.kind === 'mall' && x.name).slice(0, 8).forEach((m) => add(icon.mall, m.name, t('mall'), () => choose(which, { lon: m.lon, lat: m.lat, label: m.name })));
+    };
+    defaults();
+    input.addEventListener('input', () => {
+      clearTimeout(geoTimer);
+      const q = input.value.trim();
+      if (q.length < 2) { defaults(); return; }
+      geoTimer = setTimeout(async () => {
+        list.innerHTML = '<p class="empty">' + t('searching') + '</p>';
+        const res = await geocode(q);
+        if (input.value.trim() !== q) return;
+        list.innerHTML = '';
+        if (!res.length) { list.innerHTML = '<p class="empty">' + t('notfound') + '</p>'; return; }
+        res.forEach((r) => add(r.id ? (icon[S.args.places.find((p) => p.id === r.id).kind] || '•') : '•', r.name, r.sub, () => choose(which, r.id ? { id: r.id, lon: r.lon, lat: r.lat } : { lon: +r.lon.toFixed(5), lat: +r.lat.toFixed(5), label: r.name })));
+      }, 380);
+    });
+    setTimeout(() => { if (window.innerWidth > 760) input.focus(); }, 60);
     $('slot-' + which).classList.add('on'); $('slot-' + (which === 'src' ? 'dst' : 'src')).classList.remove('on');
   }
 
   $('slot-src').onclick = () => openPlaces('src');
   $('slot-dst').onclick = () => openPlaces('dst');
-  $('btn-swap').onclick = () => { const a = S.src; S.src = S.dst; S.dst = a; S.wantRoute = false; renderAll(); };
+  $('btn-swap').onclick = () => { const a = S.src; S.src = S.dst; S.dst = a; S.wantRoute = false; S.cmp = null; renderAll(); if (S.src && S.dst) $('btn-go').click(); };
   $('btn-go').onclick = () => {
     if (!S.src || !S.dst) { toast(t('need')); return; }
     $('place-list').hidden = true; S.picking = null;
+    if (S.cmpOpen) { S.wantCompare = true; S.cmp = null; S.cmpPending = true; renderAlgos(); }
     S.wantRoute = true; S.pendingRoute = true; S.routeKey = null; $('btn-go').classList.add('busy');
     send();
     clearTimeout(S.retry1); clearTimeout(S.retry2);
     S.retry1 = setTimeout(() => { if (S.pendingRoute) { toast(t('slow')); send(); } }, 9000);
     S.retry2 = setTimeout(() => { if (S.pendingRoute) { S.pendingRoute = false; $('btn-go').classList.remove('busy'); toast(t('noanswer')); } }, 26000);
   };
-  $('btn-why').onclick = () => { $('marks').hidden = true; $('brain').hidden = false; renderBrain(); };
-  $('btn-brain').onclick = () => { const b = $('brain'); $('marks').hidden = true; b.hidden = !b.hidden; if (!b.hidden) renderBrain(); };
+  $('btn-why').onclick = () => { $('marks').hidden = true; closeAlgos(); $('brain').hidden = false; renderBrain(); };
+  $('btn-cmp').onclick = () => openAlgos();
+  $('algos-x').onclick = () => closeAlgos();
+  $('btn-locate').onclick = () => locate('src');
+  $('btn-brain').onclick = () => { const b = $('brain'); $('marks').hidden = true; closeAlgos(); b.hidden = !b.hidden; if (!b.hidden) renderBrain(); };
   $('brain-x').onclick = () => { $('brain').hidden = true; };
   $('marks-x').onclick = () => { $('marks').hidden = true; };
   $('btn-lang').onclick = () => { S.lang = LANGS[(LANGS.indexOf(S.lang) + 1) % LANGS.length]; store.set('boran.lang', S.lang); renderAll(); };
   $('btn-theme').onclick = () => { S.themeForce = isNight() ? 'day' : 'night'; document.body.classList.toggle('night', isNight()); document.body.classList.toggle('day', !isNight()); renderAll(); };
   $('btn-ice').onclick = () => {
     S.markMode = !S.markMode; $('btn-ice').setAttribute('aria-pressed', String(S.markMode)); $('mark-pop').hidden = true;
-    if (S.markMode) { $('brain').hidden = true; $('marks').hidden = false; renderMarks(); toast(t('m_hint')); $('panel').classList.add('min'); } else { $('marks').hidden = true; toast(t('m_off')); }
+    if (S.markMode) { $('brain').hidden = true; closeAlgos(); $('marks').hidden = false; renderMarks(); toast(t('m_hint')); $('panel').classList.add('min'); } else { $('marks').hidden = true; toast(t('m_off')); }
   };
   $('btn-scn').onclick = (ev) => {
     const m = $('scn-menu');
@@ -693,6 +840,6 @@
   };
   $('panel-handle').onclick = () => $('panel').classList.toggle('min');
   $('wx').onclick = () => $('wx').classList.toggle('open');
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { $('brain').hidden = true; $('marks').hidden = true; $('scn-menu').hidden = true; $('place-list').hidden = true; S.picking = null; if (S.args) renderAll(); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { $('brain').hidden = true; closeAlgos(); $('marks').hidden = true; $('scn-menu').hidden = true; $('place-list').hidden = true; S.picking = null; if (S.args) renderAll(); } });
   window.__boran = S;
 })();

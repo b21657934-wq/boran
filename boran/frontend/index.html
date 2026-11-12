@@ -40,6 +40,7 @@
 
 <div id="scn-menu" class="glass menu" role="menu" hidden></div>
 <div id="badge" class="glass" hidden></div>
+<button id="btn-locate" class="glass fab" aria-label="locate"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8.5" opacity=".35"/></svg></button>
 <div id="legend" class="glass" aria-hidden="true"><span id="t-legend"></span><i></i><em id="t-leg-lo"></em><em id="t-leg-hi"></em></div>
 
 <section id="panel" class="glass" aria-label="route">
@@ -59,7 +60,7 @@
         <p id="adv-why"></p>
       </article>
       <div id="compare"></div>
-      <button class="link" id="btn-why"></button>
+      <div class="row2"><button class="link" id="btn-why"></button><button class="link" id="btn-cmp"></button></div>
     </div>
   </div>
 </section>
@@ -67,6 +68,11 @@
 <aside id="brain" class="glass" role="dialog" aria-label="AI" hidden>
   <div class="brain-head"><h3 id="t-brain-title"></h3><button class="x" id="brain-x" aria-label="close"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
   <div id="brain-body"></div>
+</aside>
+
+<aside id="algos" class="glass" role="dialog" hidden>
+  <div class="brain-head"><h3 id="t-algos-title"></h3><button class="x" id="algos-x" aria-label="close"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <div id="algos-body"></div>
 </aside>
 
 <aside id="marks" class="glass" role="dialog" hidden>

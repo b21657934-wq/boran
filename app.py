@@ -59,6 +59,11 @@ def analyse(name, stamp, signature):
     return pipeline.analyse(load_city(signature)[0], load_weather(name))
 
 
+@st.cache_data(ttl=600, show_spinner=False, max_entries=32)
+def find_compare(name, stamp, signature, src, dst):
+    return pipeline.compare(load_city(signature)[0], analyse(name, stamp, signature), src, dst)
+
+
 @st.cache_data(ttl=600, show_spinner=False, max_entries=64)
 def find_route(name, stamp, signature, src, dst):
     return pipeline.route(load_city(signature)[0], analyse(name, stamp, signature), load_weather(name), src, dst)
@@ -92,6 +97,13 @@ if src and dst:
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
 
+compare = None
+if src and dst and state.get("cmp"):
+    try:
+        compare = find_compare(scenario, stamp, sig, (round(src[0], 5), round(src[1], 5)), (round(dst[0], 5), round(dst[1], 5)))
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+
 payload = {
     "n": state.get("n", 0),
     "scenario": scenario,
@@ -104,6 +116,7 @@ payload = {
     "wind_k": an["wind_k"],
     "route": route,
     "error": error,
+    "compare": compare,
     "ack": state.get("n", 0),
     "cityVersion": version,
     "city": inline_city,
