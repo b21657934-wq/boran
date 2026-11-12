@@ -1,5 +1,4 @@
 (function () {
-  const D = window.deck;
   window.addEventListener('error', (e) => { try { const b = document.getElementById('toast'); b.textContent = 'JS: ' + e.message; b.hidden = false; } catch (x) { } });
   const $ = (id) => document.getElementById(id);
   const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
@@ -19,7 +18,7 @@
   };
   const t = (k, vars) => { let s = (window.I18N[S.lang] || window.I18N.ru)[k]; if (s == null) s = window.I18N.ru[k] ?? k; if (vars) for (const a in vars) s = s.split('{' + a + '}').join(vars[a]); return s; };
   const num = (v, d = 0) => Number(v).toFixed(d).replace('-', '−');
-  const isNight = () => (S.themeForce ? S.themeForce === 'night' : !S.args || S.args.weather.night !== false);
+  const isNight = () => S.themeForce === 'night';
 
   function post(type, extra) { window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, extra), '*'); }
   function send() {
@@ -48,14 +47,14 @@
       S.city.edges.forEach((e, i) => { const m = e.p[e.p.length >> 1]; e.c = m; e.i = i; });
       await initMap();
     }
-    S.risk = args.risk; S.riskVersion += 1;
+    S.risk = args.risk; S.riskVersion += 1; pushRisk();
     document.body.classList.toggle('night', isNight());
     document.body.classList.toggle('day', !isNight());
     renderAll();
     const key = args.route ? JSON.stringify([args.route.src, args.route.dst, args.scenario]) : null;
     if (key !== S.routeKey) {
       S.routeKey = key;
-      if (args.route) { S.waveT0 = performance.now(); S.routeT0 = S.waveT0 + 900; fitRoute(args.route); $('panel').classList.remove('min'); }
+      if (args.route) { S.waveT0 = performance.now(); S.routeT0 = S.waveT0 + 900; S.drawK = null; S.waveN = -1; fitRoute(args.route); $('panel').classList.remove('min'); }
     }
     if (!S.pendingRoute || args.ack >= S.n) { S.pendingRoute = false; $('btn-go').classList.remove('busy'); }
     if (args.error && S.wantRoute) toast(args.error === 'no_path' ? t('nopath') : t('err') + ' ' + args.error);
@@ -73,98 +72,197 @@
 
   const ML = window.maplibregl;
   const STYLE_URL = 'https://tiles.openfreemap.org/styles/liberty';
-  let map = null, overlay = null, baseStyle = null, styleKey = null;
+  let map = null, baseStyle = null, styleKey = null;
   const markers = { src: null, dst: null, places: [] };
-  const EMPTY = (night) => ({ version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': night ? '#0A1022' : '#EEF3F9' } }] });
+  const FC = (features) => ({ type: 'FeatureCollection', features: features || [] });
+  const PAL = {
+    day: {
+      bg: '#F4F1EA', res: '#EFEBE3', block: '#ECE7DD', park: '#CDE6B1', wood: '#BCDDA0', pitch: '#C6E3AC', water: '#9ECDF4', waterLine: '#8EC3EF',
+      road: '#FFFFFF', casing: '#DAD4C8', majorCasing: '#CBC3B5', path: '#E4DFD5', rail: '#C9C3B8', bld2d: '#E6E0D5', bldOutline: '#D3CCBF',
+      bld3d: '#EAE5DC', text: '#3D3D3D', poiText: '#666058', waterText: '#3C7DC0', halo: '#FFFFFF',
+      risk: ['#2DBE80', '#F2A93B', '#E8414B'], route: '#1E88E5', routeCasing: '#FFFFFF', routeGlow: '#1E88E5', short: '#5E6B85', ride: '#F07A1A', wave: '#1E88E5', warm: '#F07A1A', worst: '#E8414B',
+      light: { anchor: 'viewport', color: '#FFFFFF', intensity: 0.42, position: [1.2, 200, 38] },
+    },
+    night: {
+      bg: '#0A1022', res: '#0D152C', block: '#0E1630', park: '#10283A', wood: '#0F2A36', pitch: '#123044', water: '#123463', waterLine: '#1B4A85',
+      road: '#2A3862', casing: '#0A1022', majorCasing: '#0A1022', path: '#243259', rail: '#28324F', bld2d: '#18244A', bldOutline: '#27386A',
+      bld3d: '#22305E', text: '#E6EDFF', poiText: '#A9B8DE', waterText: '#6F9FE0', halo: '#0A1022',
+      risk: ['#4BE3A0', '#FFB547', '#FF5A5F'], route: '#BFF1FF', routeCasing: '#0A1022', routeGlow: '#4FD8F0', short: '#A9B4D0', ride: '#FFB46B', wave: '#9FE3FF', warm: '#FFB46B', worst: '#FF5A5F',
+      light: { anchor: 'viewport', color: '#A9BEFF', intensity: 0.32, position: [1.2, 210, 35] },
+    },
+  };
+  const pal = () => PAL[isNight() ? 'night' : 'day'];
 
-  function restyle(style, night, lang) {
-    const st = JSON.parse(JSON.stringify(style));
+  function restyle(base, night, lang) {
+    const st = JSON.parse(JSON.stringify(base));
+    const P = PAL[night ? 'night' : 'day'];
     const nameKey = lang === 'kk' ? 'name:kk' : lang === 'en' ? 'name:en' : 'name:ru';
     const out = [];
     for (const L of st.layers) {
       const sl = L['source-layer'] || '', id = L.id;
       const p = L.paint = Object.assign({}, L.paint);
       L.layout = Object.assign({}, L.layout);
-      if (sl === 'boundary') continue;
-      if (L.type === 'raster') { if (night) continue; p['raster-opacity'] = 0.35; }
-      if (L.type === 'symbol' && L.layout['text-field'] && /place|poi|transportation_name|water_name|park|aerodrome/.test(sl) && !/shield|ref/.test(id)) {
-        L.layout['text-field'] = ['coalesce', ['get', nameKey], ['get', 'name'], ['get', 'name:latin'], ['get', 'name_en']];
-      }
-      const green = sl === 'park' || sl === 'landcover' || /wood|grass|park|green|forest|cemetery|pitch/.test(id);
-      if (night) {
-        if (L.type === 'background') p['background-color'] = '#0A1022';
-        else if (L.type === 'fill') {
-          delete p['fill-pattern'];
-          p['fill-color'] = sl === 'water' ? '#123463' : sl === 'building' ? '#18244A' : green ? '#0F2536' : '#0E1630';
-          if (sl === 'building') p['fill-outline-color'] = '#27386A';
-          if (typeof p['fill-opacity'] !== 'number') p['fill-opacity'] = sl === 'water' || sl === 'building' ? 1 : 0.7;
-        } else if (L.type === 'line') {
-          delete p['line-pattern'];
-          if (sl === 'waterway') p['line-color'] = '#1B4A85';
-          else if (sl === 'transportation') {
-            const casing = /casing/.test(id), major = /motorway|trunk|primary|secondary/.test(id), rail = /rail|transit/.test(id), path = /path|pedestrian|footway|steps|track/.test(id);
-            p['line-color'] = rail ? '#28324F' : casing ? '#0A1022' : major ? '#40558F' : path ? '#2B3A63' : '#2A3862';
-          } else p['line-color'] = '#1C2747';
-        } else if (L.type === 'symbol') {
-          p['text-color'] = sl === 'water_name' ? '#5E8FD0' : sl === 'place' ? '#E6EDFF' : sl === 'transportation_name' ? '#8FA2CF' : '#A9B8DE';
-          p['text-halo-color'] = '#0A1022'; p['text-halo-width'] = 1.5; delete p['text-halo-blur'];
-          p['icon-opacity'] = 0.65;
-        } else if (L.type === 'fill-extrusion') {
-          p['fill-extrusion-color'] = ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#1A2650', 40, '#24376E', 120, '#3552A0'];
-          p['fill-extrusion-opacity'] = 0.94;
+      if (L.type === 'raster' || sl === 'boundary' || /shield/.test(id) || id === 'park_outline') continue;
+      if (L.type === 'background') p['background-color'] = P.bg;
+      else if (L.type === 'fill') {
+        delete p['fill-pattern'];
+        if (id === 'water') p['fill-color'] = P.water;
+        else if (id === 'park' || id === 'landcover_grass') { p['fill-color'] = P.park; p['fill-opacity'] = 1; }
+        else if (id === 'landcover_wood') { p['fill-color'] = P.wood; p['fill-opacity'] = 1; }
+        else if (/pitch|track/.test(id)) { p['fill-color'] = P.pitch; p['fill-opacity'] = 1; }
+        else if (id === 'landuse_residential') { p['fill-color'] = P.res; p['fill-opacity'] = 1; }
+        else if (/landuse|landcover|aeroway/.test(id)) { p['fill-color'] = P.block; p['fill-opacity'] = 1; }
+        else if (id === 'building') { p['fill-color'] = P.bld2d; p['fill-outline-color'] = P.bldOutline; }
+        else if (sl === 'transportation') { p['fill-color'] = P.path; }
+      } else if (L.type === 'line') {
+        delete p['line-pattern'];
+        if (sl === 'waterway') p['line-color'] = P.waterLine;
+        else if (sl === 'transportation') {
+          if (/rail/.test(id)) p['line-color'] = P.rail;
+          else if (/casing/.test(id)) p['line-color'] = /trunk|primary|motorway/.test(id) ? P.majorCasing : P.casing;
+          else if (/path|pedestrian/.test(id)) p['line-color'] = P.path;
+          else p['line-color'] = P.road;
+        } else if (sl === 'aeroway') p['line-color'] = P.casing;
+      } else if (L.type === 'fill-extrusion') {
+        p['fill-extrusion-color'] = P.bld3d;
+        p['fill-extrusion-opacity'] = 1;
+        p['fill-extrusion-vertical-gradient'] = true;
+        L.minzoom = 13.4;
+      } else if (L.type === 'symbol') {
+        if (L.layout['text-field'] && /place|poi|transportation_name|water_name|waterway|aerodrome/.test(sl)) {
+          L.layout['text-field'] = ['coalesce', ['get', nameKey], ['get', 'name:ru'], ['get', 'name'], ['get', 'name:latin']];
         }
-      } else {
-        if (L.type === 'background') p['background-color'] = '#F1F5FA';
-        else if (L.type === 'fill') {
-          if (sl === 'water') p['fill-color'] = '#A8CBEB';
-          else if (green) { delete p['fill-pattern']; p['fill-color'] = '#E4EEE9'; }
-          else if (sl === 'building') { p['fill-color'] = '#DCE3EE'; p['fill-outline-color'] = '#C5CFDE'; }
-          else if (sl === 'landuse') { delete p['fill-pattern']; p['fill-color'] = '#ECF1F7'; }
-        } else if (L.type === 'fill-extrusion') {
-          p['fill-extrusion-color'] = ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#E6ECF4', 60, '#D3DDEB', 150, '#BFCDE2'];
-          p['fill-extrusion-opacity'] = 0.96;
-        }
+        p['text-color'] = sl === 'water_name' || sl === 'waterway' ? P.waterText : sl === 'poi' ? P.poiText : P.text;
+        p['text-halo-color'] = P.halo; p['text-halo-width'] = 1.6; delete p['text-halo-blur'];
+        if (night) p['icon-opacity'] = 0.7;
       }
-      if (L.type === 'fill-extrusion') { L.minzoom = 13; }
       out.push(L);
     }
     if (!out.some((L) => L.type === 'fill-extrusion')) {
       const src = Object.keys(st.sources).find((k) => st.sources[k].type === 'vector');
       if (src) {
-        const layer = {
-          id: 'boran-3d', type: 'fill-extrusion', source: src, 'source-layer': 'building', minzoom: 13,
-          paint: { 'fill-extrusion-color': night ? '#1E2C58' : '#DDE4EE', 'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 8], 'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0], 'fill-extrusion-opacity': 0.94 },
-        };
-        const i = out.findIndex((L) => L.type === 'symbol');
-        if (i < 0) out.push(layer); else out.splice(i, 0, layer);
+        const at = out.findIndex((L) => L.type === 'symbol');
+        out.splice(at < 0 ? out.length : at, 0, { id: 'building-3d', type: 'fill-extrusion', source: src, 'source-layer': 'building', minzoom: 13.4, paint: { 'fill-extrusion-color': P.bld3d, 'fill-extrusion-height': ['coalesce', ['get', 'render_height'], 8], 'fill-extrusion-base': ['coalesce', ['get', 'render_min_height'], 0], 'fill-extrusion-opacity': 1 } });
       }
     }
     st.layers = out;
-    st.light = night ? { anchor: 'viewport', color: '#9FB6FF', intensity: 0.35, position: [1.3, 210, 35] } : { anchor: 'viewport', color: '#FFFFFF', intensity: 0.4, position: [1.2, 200, 40] };
+    st.light = P.light;
+    return st;
+  }
+
+  function flatStyle(night) {
+    const P = PAL[night ? 'night' : 'day'];
+    return { version: 8, glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf', sources: {}, layers: [{ id: 'background', type: 'background', paint: { 'background-color': P.bg } }], light: P.light };
+  }
+
+  function circlePoly(lon, lat, r, n = 28) {
+    const kx = 1 / (111320 * Math.cos(lat * Math.PI / 180)), ky = 1 / 110540, ring = [];
+    for (let i = 0; i <= n; i++) { const a = (i / n) * Math.PI * 2; ring.push([lon + Math.cos(a) * r * kx, lat + Math.sin(a) * r * ky]); }
+    return [ring];
+  }
+  function landmarkFeatures() {
+    const f = [];
+    const add = (lon, lat, r, base, h, color) => f.push({ type: 'Feature', properties: { base, h, color }, geometry: { type: 'Polygon', coordinates: circlePoly(lon, lat, r) } });
+    const bx = 71.43048, by = 51.12827;
+    add(bx, by, 7, 0, 3, '#D9D4CB');
+    for (let i = 0; i < 6; i++) add(bx, by, 3.2 - i * 0.1, 3 + i * 11, 3 + (i + 1) * 11, '#F7F7F4');
+    const R = 11, c = 86;
+    for (let k = 0; k < 10; k++) {
+      const z0 = c - R + (k * 2 * R) / 10, z1 = z0 + (2 * R) / 10, zm = (z0 + z1) / 2;
+      add(bx, by, Math.max(1.5, Math.sqrt(Math.max(0, R * R - (zm - c) ** 2))), z0, z1, '#E9B93A');
+    }
+    add(bx, by, 2.2, 63, 75, '#F7F7F4');
+    return FC(f);
+  }
+
+  function riskFeatures() {
+    const c = S.city;
+    if (!S.riskGeom || S.riskGeomFor !== c) {
+      S.riskGeomFor = c;
+      S.riskGeom = c.edges.map((e, i) => ({ type: 'Feature', id: i, properties: { r: 0, b: e.b }, geometry: { type: 'LineString', coordinates: e.p } }));
+    }
+    for (const f of S.riskGeom) f.properties.r = S.risk[f.id];
+    return FC(S.riskGeom);
+  }
+
+  function addOverlay(st) {
+    const P = PAL[isNight() ? 'night' : 'day'];
+    const firstBld = st.layers.findIndex((L) => L.id === 'building' || L.type === 'fill-extrusion');
+    const firstSym = st.layers.findIndex((L) => L.type === 'symbol');
+    const before = firstBld < 0 ? (firstSym < 0 ? st.layers.length : firstSym) : firstBld;
+    Object.assign(st.sources, {
+      'b-risk': { type: 'geojson', data: riskFeatures(), tolerance: 0.6 },
+      'b-route': { type: 'geojson', data: FC(), lineMetrics: true },
+      'b-short': { type: 'geojson', data: FC() },
+      'b-ride': { type: 'geojson', data: FC(), lineMetrics: true },
+      'b-points': { type: 'geojson', data: FC() },
+      'b-wave': { type: 'geojson', data: FC() },
+      'b-runner': { type: 'geojson', data: FC() },
+      'b-warm': { type: 'geojson', data: FC(S.city.warm.map((w) => ({ type: 'Feature', properties: { k: w.kind }, geometry: { type: 'Point', coordinates: [w.lon, w.lat] } }))) },
+      'b-marks': { type: 'geojson', data: FC() },
+      'b-landmarks': { type: 'geojson', data: landmarkFeatures() },
+    });
+    const riskColor = ['interpolate', ['linear'], ['get', 'r'], 20, P.risk[0], 50, P.risk[1], 80, P.risk[2]];
+    const below = [
+      { id: 'b-risk-glow', type: 'line', source: 'b-risk', minzoom: 13, filter: ['>=', ['get', 'r'], 66], layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': riskColor, 'line-blur': 3, 'line-opacity': isNight() ? 0.45 : 0.3, 'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 13, 2, 16, 9, 18, 22] } },
+      { id: 'b-risk', type: 'line', source: 'b-risk', minzoom: 12.5, filter: ['any', ['==', ['get', 'b'], 1], ['>=', ['zoom'], 14.2]], layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': riskColor, 'line-opacity': ['interpolate', ['linear'], ['zoom'], 12.5, 0, 13.5, isNight() ? 0.9 : 0.85], 'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 13, ['case', ['==', ['get', 'b'], 1], 1.4, 0.7], 16, ['case', ['==', ['get', 'b'], 1], 3.4, 2.2], 18, ['case', ['==', ['get', 'b'], 1], 8, 5]] } },
+      { id: 'b-warm', type: 'circle', source: 'b-warm', minzoom: 13,
+        paint: { 'circle-color': P.warm, 'circle-opacity': 0.18, 'circle-radius': ['interpolate', ['linear'], ['zoom'], 13, ['case', ['==', ['get', 'k'], 'mall'], 6, 2], 17, ['case', ['==', ['get', 'k'], 'mall'], 26, 9]], 'circle-stroke-color': P.warm, 'circle-stroke-width': 1.2, 'circle-stroke-opacity': 0.8, 'circle-pitch-alignment': 'map' } },
+      { id: 'b-short', type: 'line', source: 'b-short', layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': P.short, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 1.5, 17, 3.5], 'line-dasharray': [1.2, 1.6], 'line-opacity': 0 } },
+      { id: 'b-route-glow', type: 'line', source: 'b-route', layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': P.routeGlow, 'line-blur': 6, 'line-opacity': 0, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 10, 17, 26] } },
+      { id: 'b-route-casing', type: 'line', source: 'b-route', layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-gradient': ['step', ['line-progress'], P.routeCasing, 0, 'rgba(0,0,0,0)'], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 6, 17, 13] } },
+      { id: 'b-route', type: 'line', source: 'b-route', layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-gradient': ['step', ['line-progress'], P.route, 0, 'rgba(0,0,0,0)'], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3.5, 17, 8] } },
+      { id: 'b-wave', type: 'circle', source: 'b-wave', paint: { 'circle-color': P.wave, 'circle-radius': 3, 'circle-opacity': 0.7, 'circle-pitch-alignment': 'map' } },
+      { id: 'b-points', type: 'circle', source: 'b-points', paint: {
+        'circle-radius': ['case', ['==', ['get', 'k'], 'worst'], 14, 6], 'circle-color': ['case', ['==', ['get', 'k'], 'worst'], 'rgba(0,0,0,0)', isNight() ? '#0A1022' : '#FFFFFF'],
+        'circle-stroke-color': ['case', ['==', ['get', 'k'], 'worst'], P.worst, P.ride], 'circle-stroke-width': ['case', ['==', ['get', 'k'], 'worst'], 2.5, 3], 'circle-pitch-alignment': 'map' } },
+      { id: 'b-runner', type: 'circle', source: 'b-runner', paint: { 'circle-radius': 6, 'circle-color': '#FFFFFF', 'circle-stroke-color': P.route, 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' } },
+      { id: 'b-marks', type: 'circle', source: 'b-marks', paint: { 'circle-radius': 6, 'circle-color': ['match', ['get', 'a'], 'ice', P.risk[2], 'packed', P.risk[1], P.risk[0]], 'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 1.5 } },
+    ];
+    st.layers.splice(before, 0, ...below);
+    const ext = st.layers.findIndex((L) => L.type === 'fill-extrusion');
+    const sym = st.layers.findIndex((L) => L.type === 'symbol');
+    const lmAt = ext >= 0 ? ext + 1 : (sym < 0 ? st.layers.length : sym);
+    st.layers.splice(lmAt, 0,
+      { id: 'b-landmarks', type: 'fill-extrusion', source: 'b-landmarks', minzoom: 12.5, paint: { 'fill-extrusion-color': ['get', 'color'], 'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1, 'fill-extrusion-vertical-gradient': true } },
+      { id: 'b-ride', type: 'line', source: 'b-ride', layout: { 'line-cap': 'round' },
+        paint: { 'line-color': P.ride, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 17, 5], 'line-dasharray': [0.6, 1.4], 'line-opacity': 0 } });
     return st;
   }
 
   function applyStyle() {
     if (!map) return;
-    const key = (isNight() ? 'n' : 'd') + S.lang + (baseStyle ? 1 : 0);
+    const key = (isNight() ? 'n' : 'd') + S.lang + (baseStyle ? 1 : 0) + (S.city ? S.cityVersion : '');
     if (key === styleKey) return;
     styleKey = key;
-    map.setStyle(baseStyle && !S.city.demo ? restyle(baseStyle, isNight(), S.lang) : EMPTY(isNight()), { diff: false });
+    const st = baseStyle && !S.city.demo ? restyle(baseStyle, isNight(), S.lang) : flatStyle(isNight());
+    if (!baseStyle || S.city.demo) {
+      const P = pal();
+      st.sources.city_water = { type: 'geojson', data: FC(S.city.water.lines.map((l) => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: l } })).concat(S.city.water.polys.map((p) => ({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [p] } })))) };
+      st.layers.push({ id: 'city-water-fill', type: 'fill', source: 'city_water', filter: ['==', ['geometry-type'], 'Polygon'], paint: { 'fill-color': P.water } });
+      st.layers.push({ id: 'city-water-line', type: 'line', source: 'city_water', filter: ['==', ['geometry-type'], 'LineString'], paint: { 'line-color': P.water, 'line-width': ['interpolate', ['exponential', 2], ['zoom'], 11, 4, 16, 90] } });
+    }
+    map.setStyle(addOverlay(st), { diff: false });
+    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; pushRoute(true); pushMarks(); });
   }
 
-  const VIEW0 = { center: [71.4305, 51.1283], zoom: 15.2, pitch: 62, bearing: -32 };
+  const VIEW0 = { center: [71.4305, 51.1283], zoom: 15.4, pitch: 58, bearing: -28 };
   async function initMap() {
     if (map) { map.remove(); $('map').innerHTML = ''; styleKey = null; }
     const [s, w, n, e] = S.city.bbox;
     map = new ML.Map({
-      container: 'map', style: EMPTY(isNight()), center: VIEW0.center, zoom: VIEW0.zoom, pitch: VIEW0.pitch, bearing: VIEW0.bearing,
-      maxPitch: 72, minZoom: 10.5, maxZoom: 18.5, attributionControl: false, maxBounds: [[w - 0.25, s - 0.15], [e + 0.25, n + 0.15]], antialias: true,
+      container: 'map', style: flatStyle(isNight()), center: VIEW0.center, zoom: VIEW0.zoom, pitch: VIEW0.pitch, bearing: VIEW0.bearing,
+      maxPitch: 70, minZoom: 10.5, maxZoom: 18.5, attributionControl: false, maxBounds: [[w - 0.25, s - 0.15], [e + 0.25, n + 0.15]], antialias: true,
     });
     map.addControl(new ML.AttributionControl({ compact: true, customAttribution: 'OpenFreeMap © OpenMapTiles · © OpenStreetMap' }), 'bottom-right');
-    overlay = new D.MapboxOverlay({ interleaved: false, layers: [] });
-    map.addControl(overlay);
     map.on('click', (ev) => onMapClick({ coordinate: [ev.lngLat.lng, ev.lngLat.lat], x: ev.point.x, y: ev.point.y }));
-    map.on('error', () => { });
+    map.on('error', (ev) => { if (ev && ev.error && /style|layers\[/.test(String(ev.error.message))) console.warn(ev.error.message); });
     window.__map = map;
     requestAnimationFrame(frame);
     if (!S.city.demo) {
@@ -177,7 +275,7 @@
     applyStyle(); syncMarkers(); renderAll();
   }
 
-  function pinEl(cls) { const d = el('div', 'pin ' + cls, '<i></i>'); return d; }
+  function pinEl(cls) { return el('div', 'pin ' + cls, '<i></i>'); }
   function syncMarkers() {
     if (!map || !S.args) return;
     for (const k of ['src', 'dst']) {
@@ -186,6 +284,9 @@
       if (!markers[k]) markers[k] = new ML.Marker({ element: pinEl(k === 'src' ? 'a' : 'b'), anchor: 'center' }).setLngLat([p.lon, p.lat]).addTo(map);
       else markers[k].setLngLat([p.lon, p.lat]);
     }
+    const key = S.lang + (S.noTiles ? 1 : 0);
+    if (markers.placesKey === key) return;
+    markers.placesKey = key;
     markers.places.forEach((m) => m.remove()); markers.places = [];
     S.args.places.filter((p) => p.kind !== 'landmark' || S.city.demo || S.noTiles).forEach((p) => {
       const e = el('div', 'mk-label', esc(p.name[S.lang] || p.name.ru));
@@ -193,86 +294,79 @@
     });
   }
 
-  function buildLayers(now) {
-    const c = S.city, a = S.args, night = isNight();
-    const sec = (now - S.t0) / 1000;
-    const lk = night ? 'n' : 'd';
-    const flat = !baseStyle || c.demo;
-    const L = [];
-    if (flat) {
-      L.push(new D.PathLayer({ id: 'river', data: c.water.lines, getPath: (d) => d, getColor: night ? [22, 48, 92] : [150, 190, 230], getWidth: 85, widthUnits: 'meters', capRounded: true, jointRounded: true, updateTriggers: { getColor: lk } }));
-      L.push(new D.PolygonLayer({ id: 'lakes', data: c.water.polys, getPolygon: (d) => d, getFillColor: night ? [22, 48, 92] : [150, 190, 230], stroked: false, updateTriggers: { getFillColor: lk } }));
+  const src = (id) => (map && map.getSource(id)) || null;
+  function setPaint(id, k, v) { if (map && map.getLayer(id)) map.setPaintProperty(id, k, v); }
+
+  function pushRisk() { const s = src('b-risk'); if (s) s.setData(riskFeatures()); }
+  function pushMarks() { const s = src('b-marks'); if (s) s.setData(FC(S.marks.map((m) => ({ type: 'Feature', properties: { a: m.actual }, geometry: { type: 'Point', coordinates: [m.lon, m.lat] } })))); }
+
+  function lineLen(line) { let a = 0; for (let i = 1; i < line.length; i++) a += Math.hypot((line[i][0] - line[i - 1][0]) * 0.63, line[i][1] - line[i - 1][1]); return a; }
+  function pointAt(line, t) {
+    const L = lineLen(line); let need = L * t;
+    for (let i = 1; i < line.length; i++) {
+      const d = Math.hypot((line[i][0] - line[i - 1][0]) * 0.63, line[i][1] - line[i - 1][1]);
+      if (need <= d || i === line.length - 1) { const k = d ? Math.min(1, need / d) : 0; return [line[i - 1][0] + (line[i][0] - line[i - 1][0]) * k, line[i - 1][1] + (line[i][1] - line[i - 1][1]) * k]; }
+      need -= d;
     }
-    const rv = S.riskVersion + lk;
-    if (S.glowFor !== S.riskVersion) { S.glowFor = S.riskVersion; S.glow = c.edges.filter((d) => S.risk[d.i] > 62); }
-    L.push(new D.PathLayer({
-      id: 'risk-glow', data: S.glow, getPath: (d) => d.p, getColor: (d) => riskColor(S.risk[d.i] / 100, night ? 60 : 55),
-      getWidth: (d) => (d.b ? 26 : 16), widthUnits: 'meters', widthMinPixels: 2, capRounded: true, jointRounded: true,
-      updateTriggers: { getColor: rv }, transitions: { getColor: 700 },
-    }));
-    L.push(new D.PathLayer({
-      id: 'risk', data: c.edges, getPath: (d) => d.p, getColor: (d) => riskColor(S.risk[d.i] / 100, night ? 225 : 215),
-      getWidth: (d) => (d.b ? 7 : 3.5), widthUnits: 'meters', widthMinPixels: 1.4, capRounded: true, jointRounded: true,
-      updateTriggers: { getColor: rv }, transitions: { getColor: 700 },
-    }));
-    L.push(new D.ScatterplotLayer({
-      id: 'warm', data: c.warm, getPosition: (d) => [d.lon, d.lat], getRadius: (d) => (d.kind === 'mall' ? 55 : 14) * (1 + 0.25 * Math.sin(sec * 2.2 + d.lon * 9000)),
-      getFillColor: (d) => [255, 180, 107, d.kind === 'mall' ? 75 : 110], radiusUnits: 'meters', radiusMinPixels: 2.5, stroked: true, getLineColor: [255, 190, 120, 220], lineWidthMinPixels: 1,
-      updateTriggers: { getRadius: Math.floor(sec * 20) },
-    }));
-    const r = S.wantRoute ? a.route : null;
-    if (r) {
-      const waveK = Math.max(0, Math.min(1, (now - S.waveT0) / 900));
-      const wave = (r.transit ? r.transit.wave : r.wave) || [];
-      const fade = Math.max(0, 1 - Math.max(0, now - S.waveT0 - 900) / 1100);
-      if (fade > 0) {
-        L.push(new D.ScatterplotLayer({ id: 'wave', data: wave.slice(0, Math.ceil(wave.length * waveK)), getPosition: (d) => d, getRadius: 5, radiusUnits: 'pixels', getFillColor: [159, 227, 255, Math.round(200 * fade)] }));
-      }
-      const drawK = Math.max(0, Math.min(1, (now - S.routeT0) / 1700));
-      const shortLines = r.transit ? r.transit.short_legs : [r.short.line];
-      const safeLines = r.transit ? r.transit.legs : [r.safe.line];
-      L.push(new D.PathLayer({
-        id: 'short', data: shortLines, getPath: (d) => d, getColor: night ? [255, 255, 255, Math.round(190 * drawK)] : [40, 60, 100, Math.round(210 * drawK)], getWidth: 3, widthUnits: 'pixels',
-        getDashArray: [5, 4], dashJustified: true, extensions: [new D.PathStyleExtension({ dash: true })], updateTriggers: { getColor: [drawK, lk] },
-      }));
-      if (!S.trips || S.tripsFor !== r) {
-        S.tripsFor = r;
-        S.trips = safeLines.map((line) => {
-          let acc = 0; const ts = [0];
-          for (let i = 1; i < line.length; i++) { acc += Math.hypot((line[i][0] - line[i - 1][0]) * 0.63, line[i][1] - line[i - 1][1]); ts.push(acc); }
-          return { path: line, ts: ts.map((v) => v / (acc || 1)) };
-        });
-      }
-      const trips = S.trips;
-      const col = night ? [159, 227, 255] : [14, 143, 163];
-      L.push(new D.TripsLayer({ id: 'safe-glow', data: trips, getPath: (d) => d.path, getTimestamps: (d) => d.ts, getColor: col, opacity: 0.28, widthMinPixels: 18, capRounded: true, jointRounded: true, trailLength: 2, fadeTrail: false, currentTime: drawK }));
-      L.push(new D.TripsLayer({ id: 'safe', data: trips, getPath: (d) => d.path, getTimestamps: (d) => d.ts, getColor: night ? [225, 247, 255] : [14, 143, 163], opacity: 1, widthMinPixels: 6, capRounded: true, jointRounded: true, trailLength: 2, fadeTrail: false, currentTime: drawK }));
-      if (drawK >= 1) {
-        L.push(new D.TripsLayer({ id: 'safe-pulse', data: trips, getPath: (d) => d.path, getTimestamps: (d) => d.ts, getColor: [255, 255, 255], opacity: 0.95, widthMinPixels: 8, capRounded: true, jointRounded: true, trailLength: 0.14, fadeTrail: true, currentTime: (sec * 0.32) % 1.2 }));
-      }
-      if (r.transit) {
-        L.push(new D.ArcLayer({ id: 'ride', data: [r.transit.ride], getSourcePosition: (d) => d[0], getTargetPosition: (d) => d[1], getSourceColor: [159, 227, 255, Math.round(240 * drawK)], getTargetColor: [255, 180, 107, Math.round(240 * drawK)], getWidth: 5, getHeight: 0.22, greatCircle: false, updateTriggers: { getSourceColor: drawK, getTargetColor: drawK } }));
-        L.push(new D.ScatterplotLayer({ id: 'ride-stops', data: r.transit.stops, getPosition: (d) => [d.lon, d.lat], getRadius: 7, radiusUnits: 'pixels', getFillColor: [10, 16, 38], stroked: true, getLineColor: [159, 227, 255], lineWidthMinPixels: 2.5 }));
-      }
-      if (r.bayes && r.bayes.at) {
-        const pulse = 1 + 0.35 * Math.sin(sec * 3);
-        L.push(new D.ScatterplotLayer({ id: 'worst', data: [r.bayes.at], getPosition: (d) => d, getRadius: 16 * pulse, radiusUnits: 'pixels', filled: false, stroked: true, getLineColor: [255, 90, 95, 240], lineWidthMinPixels: 2.5, updateTriggers: { getRadius: sec } }));
-      }
+    return line[line.length - 1];
+  }
+
+  function pushRoute(force) {
+    if (!map || !src('b-route')) return;
+    const r = S.wantRoute ? S.args.route : null;
+    if (!force && S.routeDrawn === r) return;
+    S.routeDrawn = r;
+    const lineF = (lines) => FC(lines.map((l) => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: l } })));
+    if (!r) {
+      ['b-route', 'b-short', 'b-ride', 'b-points', 'b-wave', 'b-runner'].forEach((id) => src(id) && src(id).setData(FC()));
+      return;
     }
-    if (S.marks.length) {
-      const mc = { ice: [255, 90, 95], packed: [255, 181, 71], dry: [75, 227, 160] };
-      L.push(new D.ScatterplotLayer({ id: 'marks', data: S.marks, getPosition: (d) => [d.lon, d.lat], getRadius: 6, radiusUnits: 'pixels', getFillColor: (d) => mc[d.actual], stroked: true, getLineColor: [255, 255, 255], lineWidthMinPixels: 1.5 }));
+    const safe = r.transit ? r.transit.legs : [r.safe.line];
+    const short = r.transit ? r.transit.short_legs : [r.short.line];
+    S.safeLines = safe;
+    src('b-route').setData(lineF(safe));
+    src('b-short').setData(lineF(short));
+    src('b-ride').setData(r.transit ? lineF([r.transit.ride]) : FC());
+    const pts = [];
+    if (r.transit) r.transit.stops.forEach((s) => pts.push({ type: 'Feature', properties: { k: 'stop' }, geometry: { type: 'Point', coordinates: [s.lon, s.lat] } }));
+    if (r.bayes && r.bayes.at) pts.push({ type: 'Feature', properties: { k: 'worst' }, geometry: { type: 'Point', coordinates: r.bayes.at } });
+    src('b-points').setData(FC(pts));
+  }
+
+  function animate(now) {
+    const r = S.wantRoute && S.args.route;
+    if (!r || !src('b-route')) return;
+    const P = pal();
+    const waveK = Math.max(0, Math.min(1, (now - S.waveT0) / 900));
+    const wave = (r.transit ? r.transit.wave : r.wave) || [];
+    const waveFade = Math.max(0, 1 - Math.max(0, now - S.waveT0 - 900) / 1100);
+    const wn = waveFade > 0 ? Math.ceil(wave.length * waveK) : 0;
+    if (wn !== S.waveN) { S.waveN = wn; src('b-wave').setData(FC(wave.slice(0, wn).map((p) => ({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: p } })))); }
+    setPaint('b-wave', 'circle-opacity', 0.75 * waveFade);
+    const k = Math.max(0, Math.min(1, (now - S.routeT0) / 1700));
+    if (k !== S.drawK) {
+      S.drawK = k;
+      const tr = 'rgba(0,0,0,0)';
+      setPaint('b-route', 'line-gradient', k >= 1 ? ['step', ['line-progress'], P.route, 2, P.route] : ['step', ['line-progress'], P.route, Math.max(0.0001, k), tr]);
+      setPaint('b-route-casing', 'line-gradient', k >= 1 ? ['step', ['line-progress'], P.routeCasing, 2, P.routeCasing] : ['step', ['line-progress'], P.routeCasing, Math.max(0.0001, k), tr]);
+      setPaint('b-route-glow', 'line-opacity', (isNight() ? 0.55 : 0.28) * k);
+      setPaint('b-short', 'line-opacity', 0.85 * k);
+      setPaint('b-ride', 'line-opacity', 0.95 * k);
     }
-    return L;
+    if (k >= 1 && S.safeLines) {
+      const sec = now / 1000;
+      const runner = S.safeLines.map((l) => ({ type: 'Feature', properties: {}, geometry: { type: 'Point', coordinates: pointAt(l, (sec * 0.12) % 1) } }));
+      src('b-runner').setData(FC(runner));
+    }
   }
 
   function frame(now) {
     requestAnimationFrame(frame);
-    if (!overlay || !S.city || !S.args || document.hidden) return;
-    const animating = S.wantRoute && S.args.route && now - S.waveT0 < 3200;
-    if (animating || now - (S.lastDeck || 0) > 90) { S.lastDeck = now; overlay.setProps({ layers: buildLayers(now) }); }
+    if (!map || !S.city || !S.args || document.hidden) return;
+    if (now - (S.lastAnim || 0) > 33) { S.lastAnim = now; animate(now); }
     drawSnow(now);
   }
+
 
   const snow = { cv: $('snow'), ctx: $('snow').getContext('2d'), parts: [], w: 0, h: 0, last: 0 };
   function sizeSnow() {
@@ -348,7 +442,7 @@
     $('slot-src').classList.toggle('on', S.picking === 'src'); $('slot-dst').classList.toggle('on', S.picking === 'dst');
     if ($('sp-sub')) $('sp-sub').textContent = t('sp', { t: num(Math.round(now.temp)) });
     renderResult();
-    applyStyle(); syncMarkers();
+    applyStyle(); syncMarkers(); pushRoute(false);
     if (!$('brain').hidden) renderBrain();
     if (!$('marks').hidden) renderMarks();
   }
@@ -477,7 +571,7 @@
       const rows = ['time,lon,lat,actual,predicted,risk,scenario'].concat(M.map((m) => [m.t, m.lon, m.lat, m.actual, m.pred, m.risk, m.scenario].join(',')));
       const a = el('a'); a.href = URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv' })); a.download = 'boran_marks.csv'; a.click();
     };
-    $('m-clear').onclick = () => { S.marks = []; store.set('boran.marks', []); renderMarks(); };
+    $('m-clear').onclick = () => { S.marks = []; store.set('boran.marks', []); renderMarks(); pushMarks(); };
   }
 
   let toastTimer = null;
@@ -503,7 +597,7 @@
       pop.querySelectorAll('button').forEach((b) => { b.onclick = () => {
         const pr = predictAt(lon, lat);
         S.marks.push({ t: new Date().toISOString(), lon: +lon.toFixed(5), lat: +lat.toFixed(5), actual: b.dataset.c, pred: pr.pred, risk: +pr.risk.toFixed(2), scenario: S.args.scenario });
-        store.set('boran.marks', S.marks); pop.hidden = true; toast(t('m_saved'));
+        store.set('boran.marks', S.marks); pop.hidden = true; toast(t('m_saved')); pushMarks();
         if (!$('marks').hidden) renderMarks();
       }; });
     }
@@ -576,7 +670,7 @@
     ['live'].concat(S.args.scenarios).forEach((k) => {
       const b = el('button', k === S.args.scenario ? 'on' : '', '<span>' + t('scn_' + k) + '<small>' + (k === 'live' ? t('scn_live_d') : t('scn_d')) + '</small></span>');
       b.setAttribute('role', 'menuitemradio');
-      b.onclick = () => { m.hidden = true; S.scenario = k; S.themeForce = null; S.routeKey = null; send(); };
+      b.onclick = () => { m.hidden = true; S.scenario = k; S.routeKey = null; send(); };
       m.append(b);
     });
     m.hidden = false;
