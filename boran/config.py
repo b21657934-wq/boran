@@ -11,10 +11,10 @@ PLACES = [
      "name": {"ru": "Байтерек", "kk": "Бәйтерек", "en": "Baiterek"}},
     {"id": "khanshatyr", "lat": 51.1323, "lon": 71.4036, "kind": "landmark",
      "name": {"ru": "Хан Шатыр", "kk": "Хан Шатыр", "en": "Khan Shatyr"}},
-    {"id": "mosque", "lat": 51.0758, "lon": 71.4146, "kind": "landmark",
-     "name": {"ru": "Мечеть Астана", "kk": "Астана мешіті", "en": "Astana Grand Mosque"}},
-    {"id": "station", "lat": 51.1328, "lon": 71.3970, "kind": "landmark",
+    {"id": "station", "lat": 51.1125, "lon": 71.5327, "kind": "landmark",
      "name": {"ru": "Вокзал Нурлы Жол", "kk": "Нұрлы Жол вокзалы", "en": "Nurly Zhol station"}},
+    {"id": "station1", "lat": 51.1948, "lon": 71.4091, "kind": "landmark",
+     "name": {"ru": "Вокзал Астана-1", "kk": "Астана-1 вокзалы", "en": "Astana-1 station"}},
     {"id": "pyramid", "lat": 51.1236, "lon": 71.4636, "kind": "landmark",
      "name": {"ru": "Дворец мира и согласия", "kk": "Бейбітшілік және келісім сарайы", "en": "Palace of Peace"}},
 ]
