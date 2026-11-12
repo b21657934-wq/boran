@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install requests osmium
-      - run: python tools/build_data.py
+      - run: python tools/build_data.py /tmp/kazakhstan.osm.pbf
       - name: Commit data
         run: |
           git config user.name "github-actions[bot]"

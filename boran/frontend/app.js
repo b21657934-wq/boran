@@ -65,7 +65,8 @@
   const mix = (a, b, k) => a.map((v, i) => Math.round(v + (b[i] - v) * k));
   function riskColor(r, alpha) {
     const ok = [75, 227, 160], warn = [255, 181, 71], bad = [255, 90, 95];
-    const c = r < 0.4 ? mix(ok, warn, r / 0.4) : mix(warn, bad, Math.min(1, (r - 0.4) / 0.35));
+    const k = Math.max(0, Math.min(1, (r - 0.15) / 0.7));
+    const c = k < 0.5 ? mix(ok, warn, k / 0.5) : mix(warn, bad, (k - 0.5) / 0.5);
     return [c[0], c[1], c[2], alpha];
   }
 
@@ -203,8 +204,9 @@
       L.push(new D.PolygonLayer({ id: 'lakes', data: c.water.polys, getPolygon: (d) => d, getFillColor: night ? [22, 48, 92] : [150, 190, 230], stroked: false, updateTriggers: { getFillColor: lk } }));
     }
     const rv = S.riskVersion + lk;
+    if (S.glowFor !== S.riskVersion) { S.glowFor = S.riskVersion; S.glow = c.edges.filter((d) => S.risk[d.i] > 62); }
     L.push(new D.PathLayer({
-      id: 'risk-glow', data: c.edges, getPath: (d) => d.p, getColor: (d) => riskColor(S.risk[d.i] / 100, S.risk[d.i] > 55 ? (night ? 60 : 55) : 0),
+      id: 'risk-glow', data: S.glow, getPath: (d) => d.p, getColor: (d) => riskColor(S.risk[d.i] / 100, night ? 60 : 55),
       getWidth: (d) => (d.b ? 26 : 16), widthUnits: 'meters', widthMinPixels: 2, capRounded: true, jointRounded: true,
       updateTriggers: { getColor: rv }, transitions: { getColor: 700 },
     }));
@@ -267,7 +269,8 @@
   function frame(now) {
     requestAnimationFrame(frame);
     if (!overlay || !S.city || !S.args || document.hidden) return;
-    overlay.setProps({ layers: buildLayers(now) });
+    const animating = S.wantRoute && S.args.route && now - S.waveT0 < 3200;
+    if (animating || now - (S.lastDeck || 0) > 90) { S.lastDeck = now; overlay.setProps({ layers: buildLayers(now) }); }
     drawSnow(now);
   }
 

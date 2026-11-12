@@ -178,11 +178,11 @@ def build(raw, demo=False):
                     continue
                 mid = seg[len(seg) // 2]
                 mx, my = proj.xy(mid["lon"], mid["lat"])
-                near_b = list(bgrid.near(mx, my, 70.0))
+                near_b = list(bgrid.near(mx, my, 120.0))
                 mask = 0
                 if any(h >= 20 for d, h in near_b if d <= 60 * 60):
                     mask |= FEATURE_BITS["shade"]
-                if hw in BIG or bridge or len(near_b) < 2:
+                if hw in BIG or bridge or not near_b:
                     mask |= FEATURE_BITS["open"]
                 if hw not in CLEANED and not sidewalk:
                     mask |= FEATURE_BITS["uncleaned"]
