@@ -273,6 +273,8 @@
       maxPitch: 70, minZoom: 10.5, maxZoom: 18.5, attributionControl: false, maxBounds: [[w - 0.25, s - 0.15], [e + 0.25, n + 0.15]], antialias: true,
     });
     map.addControl(new ML.AttributionControl({ compact: true }), 'bottom-right');
+    const foldAttrib = () => { const a = document.querySelector('.maplibregl-ctrl-attrib'); if (a) { a.classList.add('maplibregl-compact'); a.classList.remove('maplibregl-compact-show'); a.removeAttribute('open'); } };
+    map.once('load', () => setTimeout(foldAttrib, 400)); map.on('styledata', () => setTimeout(foldAttrib, 400));
     map.on('click', (ev) => onMapClick({ coordinate: [ev.lngLat.lng, ev.lngLat.lat], x: ev.point.x, y: ev.point.y }));
     map.on('error', (ev) => { if (ev && ev.error && /style|layers\[/.test(String(ev.error.message))) console.warn(ev.error.message); });
     window.__map = map;

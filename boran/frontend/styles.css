@@ -219,7 +219,7 @@ table.cm td.d{background:rgba(75,227,160,.18);color:var(--ok);font-weight:800}
   .tool span{display:none}.tool{padding:0;width:44px;justify-content:center}
   #tools{max-width:104px}
   #legend{display:none}
-  .maplibregl-ctrl-bottom-right{bottom:auto;top:calc(var(--sat) + 170px)}
+  .maplibregl-ctrl-bottom-right{bottom:auto;top:calc(var(--sat) + 176px);right:calc(var(--sar) + 6px)}
   #badge{top:auto;bottom:calc(var(--sab) + 190px);max-width:80vw}
   #panel{left:0;right:0;bottom:0;width:auto;border-radius:var(--r3) var(--r3) 0 0;max-height:58dvh;padding-bottom:var(--sab)}
   #panel .handle{display:grid;place-items:center;height:22px;flex:none;touch-action:none}
