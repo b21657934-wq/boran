@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -38,15 +39,24 @@ def data_signature():
 @st.cache_resource(show_spinner=False, max_entries=2)
 def load_city(signature):
     city = graph.get_city()
-    blob = json.dumps(city.frontend(), ensure_ascii=False, separators=(",", ":"))
-    version = hashlib.md5(blob.encode("utf-8")).hexdigest()[:10]
-    served = True
+    meta, tiles = city.frontend()
+    blob = json.dumps(meta, ensure_ascii=False, separators=(",", ":"))
+    version = hashlib.md5((blob + signature).encode("utf-8")).hexdigest()[:10]
     try:
+        root = os.path.join(FRONTEND, "tiles")
+        tile_dir = os.path.join(root, version)
+        os.makedirs(tile_dir, exist_ok=True)
+        for old in os.listdir(root):
+            if old != version:
+                shutil.rmtree(os.path.join(root, old), ignore_errors=True)
+        for key, edges in tiles.items():
+            with open(os.path.join(tile_dir, key + ".json"), "w", encoding="utf-8") as f:
+                json.dump(edges, f, separators=(",", ":"))
         with open(os.path.join(FRONTEND, "city.json"), "w", encoding="utf-8") as f:
             f.write(blob)
+        return city, version, None
     except OSError:
-        served = False
-    return city, version, (None if served else json.loads(blob))
+        return city, version, dict(meta, inline=tiles)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
@@ -112,7 +122,7 @@ payload = {
     "weather": wx,
     "hmm": an["hmm"],
     "prior": round(an["prior"], 4),
-    "risk": [int(round(r * 100)) for r in an["risks"]],
+    "riskTable": [int(round(an["table"][m] * 100)) for m in range(32)],
     "wind_k": an["wind_k"],
     "route": route,
     "error": error,

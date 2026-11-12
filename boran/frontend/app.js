@@ -13,7 +13,7 @@
   const S = {
     args: null, city: null, cityVersion: null, lang: store.get('boran.lang', 'ru'), themeForce: null,
     src: null, dst: null, picking: null, markMode: false, n: 0, pendingRoute: false,
-    routeKey: null, routeT0: 0, waveT0: 0, view: null, riskVersion: 0, risk: null,
+    routeKey: null, routeT0: 0, waveT0: 0, view: null, riskTable: null, tiles: new Map(), tileReq: new Map(), tileShown: '',
     marks: store.get('boran.marks', []), splashDone: false, introDone: false, t0: performance.now(),
   };
   const t = (k, vars) => { let s = (window.I18N[S.lang] || window.I18N.ru)[k]; if (s == null) s = window.I18N.ru[k] ?? k; if (vars) for (const a in vars) s = s.split('{' + a + '}').join(vars[a]); return s; };
@@ -44,10 +44,12 @@
     if (S.cityVersion !== args.cityVersion) {
       S.cityVersion = args.cityVersion;
       S.city = args.city || await fetch('city.json?v=' + args.cityVersion).then((r) => r.json());
-      S.city.edges.forEach((e, i) => { const m = e.p[e.p.length >> 1]; e.c = m; e.i = i; });
+      S.tileSet = new Set(S.city.tiles); S.tiles = new Map(); S.tileReq = new Map(); S.tileShown = '';
+      if (S.city.inline) for (const k in S.city.inline) S.tiles.set(k, tileFeats(S.city.inline[k]));
+      S.riskTable = args.riskTable;
       await initMap();
     }
-    S.risk = args.risk; S.riskVersion += 1; pushRisk();
+    if (String(S.riskTable) !== String(args.riskTable)) { S.riskTable = args.riskTable; pushRisk(); }
     document.body.classList.toggle('night', isNight());
     document.body.classList.toggle('day', !isNight());
     renderAll();
@@ -179,15 +181,63 @@
     return FC(f);
   }
 
-  function riskFeatures() {
-    const c = S.city;
-    if (!S.riskGeom || S.riskGeomFor !== c) {
-      S.riskGeomFor = c;
-      S.riskGeom = c.edges.map((e, i) => ({ type: 'Feature', id: i, properties: { r: 0, b: e.b }, geometry: { type: 'LineString', coordinates: e.p } }));
-    }
-    for (const f of S.riskGeom) f.properties.r = S.risk[f.id];
-    return FC(S.riskGeom);
+  const TILE_Z = 12.5, DETAIL_Z = 14.4;
+  function tileFeats(arr) {
+    const all = arr.map(([p, m, b]) => ({ type: 'Feature', properties: { m, b }, geometry: { type: 'LineString', coordinates: p } }));
+    all.big = all.filter((f) => f.properties.b === 1);
+    all.mid = arr.map(([p]) => p[p.length >> 1]);
+    return all;
   }
+  const tileKey = (lon, lat) => { const [s, w] = S.city.bbox, [dy, dx] = S.city.cell; return Math.floor((lat - s) / dy) + '_' + Math.floor((lon - w) / dx); };
+  function loadTile(k) {
+    if (S.tiles.has(k)) return Promise.resolve(S.tiles.get(k));
+    if (!S.tileSet.has(k)) return Promise.resolve(null);
+    if (S.tileReq.has(k)) return S.tileReq.get(k);
+    const v = S.cityVersion;
+    const pr = fetch('tiles/' + v + '/' + k + '.json').then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then((arr) => { if (v !== S.cityVersion) return null; const f = tileFeats(arr); S.tiles.set(k, f); return f; })
+      .catch(() => { S.tileReq.delete(k); return null; });
+    S.tileReq.set(k, pr);
+    return pr;
+  }
+  function viewTiles() {
+    if (!map || !S.city || map.getZoom() < TILE_Z) return { keys: [], low: true };
+    const z = map.getZoom(), low = z < DETAIL_Z, b = map.getBounds(), c = map.getCenter();
+    const [s, w, n, e] = S.city.bbox, [dy, dx] = S.city.cell;
+    const rad = low ? 9 : 2.6;
+    const lo = Math.max(s, b.getSouth(), c.lat - rad * dy), hi = Math.min(n, b.getNorth(), c.lat + rad * dy);
+    const le = Math.max(w, b.getWest(), c.lng - rad * dx), ri = Math.min(e, b.getEast(), c.lng + rad * dx);
+    const keys = [];
+    if (lo > hi || le > ri) return { keys, low };
+    for (let r = Math.floor((lo - s) / dy); r <= Math.floor((hi - s) / dy); r++)
+      for (let q = Math.floor((le - w) / dx); q <= Math.floor((ri - w) / dx); q++) { const k = r + '_' + q; if (S.tileSet.has(k)) keys.push(k); }
+    return { keys, low };
+  }
+  function riskFeatures() {
+    const { keys, low } = S.view || { keys: [], low: true };
+    const out = [];
+    for (const k of keys) { const f = S.tiles.get(k); if (f) { const L = low ? f.big : f; for (let i = 0; i < L.length; i++) out.push(L[i]); } }
+    return FC(out);
+  }
+  let tileTimer = null;
+  function showTiles() {
+    tileTimer = null;
+    const v = S.view || { keys: [] };
+    const sig = (v.low ? 'L' : 'H') + v.keys.filter((k) => S.tiles.has(k)).join(',');
+    if (sig === S.tileShown) return;
+    S.tileShown = sig;
+    const s = src('b-risk'); if (s) s.setData(riskFeatures());
+  }
+  function refreshTiles() {
+    if (!map || !S.city) return;
+    S.view = viewTiles();
+    const wait = S.view.keys.filter((k) => !S.tiles.has(k));
+    wait.forEach((k) => loadTile(k).then(() => { if (!tileTimer) tileTimer = setTimeout(showTiles, 80); }));
+    showTiles();
+  }
+  const rExpr = () => ['at', ['get', 'm'], ['literal', S.riskTable && S.riskTable.length === 32 ? S.riskTable : new Array(32).fill(0)]];
+  const riskPaint = (P) => ['interpolate', ['linear'], rExpr(), 20, P.risk[0], 50, P.risk[1], 80, P.risk[2]];
+  const glowFilter = () => ['all', ['>=', rExpr(), 80], ['==', ['get', 'b'], 1]];
 
   function addOverlay(st) {
     const P = PAL[isNight() ? 'night' : 'day'];
@@ -208,9 +258,9 @@
       'b-cmp': { type: 'geojson', data: FC() },
       'b-cmp-wave': { type: 'geojson', data: FC() },
     });
-    const riskColor = ['interpolate', ['linear'], ['get', 'r'], 20, P.risk[0], 50, P.risk[1], 80, P.risk[2]];
+    const riskColor = riskPaint(P);
     const below = [
-      { id: 'b-risk-glow', type: 'line', source: 'b-risk', minzoom: 13, filter: ['all', ['>=', ['get', 'r'], 80], ['==', ['get', 'b'], 1]], layout: { 'line-cap': 'round', 'line-join': 'round' },
+      { id: 'b-risk-glow', type: 'line', source: 'b-risk', minzoom: 13, filter: glowFilter(), layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': riskColor, 'line-blur': 4, 'line-opacity': isNight() ? 0.4 : 0.22, 'line-width': ['interpolate', ['exponential', 1.6], ['zoom'], 13, 3, 16, 10, 18, 24] } },
       { id: 'b-risk', type: 'line', source: 'b-risk', minzoom: 12.5, filter: ['any', ['==', ['get', 'b'], 1], ['>=', ['zoom'], 14.6]], layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': riskColor,
@@ -266,7 +316,7 @@
     S.styleTry = (S.styleTry || 0) + 1;
     const attempt = S.styleTry;
     map.setStyle(full, { diff: false });
-    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; pushRoute(true); pushMarks(); pushCompare(); });
+    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; S.tileShown = ''; refreshTiles(); pushRoute(true); pushMarks(); pushCompare(); });
     setTimeout(() => {
       if (attempt !== S.styleTry || (map.getStyle() && map.getLayer('b-risk'))) return;
       if (attempt > 3) return;
@@ -285,6 +335,7 @@
     map.addControl(new ML.AttributionControl({ compact: true }), 'bottom-right');
     const foldAttrib = () => { const a = document.querySelector('.maplibregl-ctrl-attrib'); if (a) { a.classList.add('maplibregl-compact'); a.classList.remove('maplibregl-compact-show'); a.removeAttribute('open'); } };
     map.once('load', () => setTimeout(foldAttrib, 400)); map.on('styledata', () => setTimeout(foldAttrib, 400));
+    map.on('moveend', refreshTiles);
     map.on('click', (ev) => onMapClick({ coordinate: [ev.lngLat.lng, ev.lngLat.lat], x: ev.point.x, y: ev.point.y }));
     map.on('error', (ev) => { if (ev && ev.error && /style|layers\[/.test(String(ev.error.message))) console.warn(ev.error.message); });
     window.__map = map;
@@ -321,7 +372,12 @@
   const src = (id) => (map && map.getSource(id)) || null;
   function setPaint(id, k, v) { if (map && map.getLayer(id)) map.setPaintProperty(id, k, v); }
 
-  function pushRisk() { const s = src('b-risk'); if (s) s.setData(riskFeatures()); }
+  function pushRisk() {
+    if (!map || !map.getLayer('b-risk')) return;
+    const P = PAL[isNight() ? 'night' : 'day'];
+    setPaint('b-risk', 'line-color', riskPaint(P)); setPaint('b-risk-glow', 'line-color', riskPaint(P));
+    if (map.getLayer('b-risk-glow')) map.setFilter('b-risk-glow', glowFilter());
+  }
   function pushMarks() { const s = src('b-marks'); if (s) s.setData(FC(S.marks.map((m) => ({ type: 'Feature', properties: { a: m.actual }, geometry: { type: 'Point', coordinates: [m.lon, m.lat] } })))); }
 
   function lineLen(line) { let a = 0; for (let i = 1; i < line.length; i++) a += Math.hypot((line[i][0] - line[i - 1][0]) * 0.63, line[i][1] - line[i - 1][1]); return a; }
@@ -553,11 +609,11 @@
       const facts = b.steps.map((s) => '<div class="fact"><span class="tick ' + (s.present ? 'y' : '') + '">' + (s.present ? '✓' : '–') + '</span><span style="color:' + (s.present ? 'var(--t1)' : 'var(--t3)') + '">' + t('f_' + s.feature) + '</span><span class="p">' + num(s.after, 2) + '</span></div>').join('');
       html += step(2, t('s2'), t('s2a'), io([['in', t('s2in', { p: '<b>' + num(b.prior, 2) + '</b>' })]]) + facts + '<div class="fact"><div class="bar" style="--w:' + (100 / Math.max(0.05, b.posterior)).toFixed(0) + '%"><i style="width:' + (b.posterior * 100).toFixed(0) + '%"></i></div></div>' + io([['out', '<b>' + t('s2out', { q: num(b.posterior, 2) }) + '</b>']]) + '<p class="say">' + t('s2say') + '</p>');
     } else html += step(2, t('s2'), t('s2a'), io([['in', t('s2in', { p: '<b>' + num(a.prior, 2) + '</b>' })]]) + '<p class="empty">' + t('s2empty') + '</p>');
-    const nn = new Set(); S.city.edges.forEach((e) => { nn.add(e.p[0].join()); nn.add(e.p[e.p.length - 1].join()); });
+    const st = S.city.stats || { nodes: 0, edges: 0 };
     if (r) {
       const x = r.transit ? r.transit.expanded : r.safe.expanded;
       html += step(3, t('s3'), t('s3a'), io([
-        ['in', t('s3in', { n: nn.size, e: S.city.edges.length })],
+        ['in', t('s3in', { n: st.nodes.toLocaleString('ru-RU'), e: st.edges.toLocaleString('ru-RU') })],
         ['calc', t('s3calc', { a: a.params.alpha, b: num(a.params.beta * a.wind_k, 2) })],
         ['out', '<b>' + t('s3out', { x, y: r.expanded_short }) + '</b>'],
       ]) + '<p class="say">' + t('s3say') + '</p><button class="btn2" id="brain-cmp" style="margin-top:10px">' + t('brain_cmp') + '</button>');
@@ -574,17 +630,20 @@
         ['out', '<b>' + t('a_' + m.best) + '</b>'],
       ]) + tb + '<p class="say">' + t('s4say') + '</p>');
     } else {
-      html += step(3, t('s3'), t('s3a'), io([['in', t('s3in', { n: nn.size, e: S.city.edges.length })]]) + '<p class="empty">' + t('s3empty') + '</p>');
+      html += step(3, t('s3'), t('s3a'), io([['in', t('s3in', { n: st.nodes.toLocaleString('ru-RU'), e: st.edges.toLocaleString('ru-RU') })]]) + '<p class="empty">' + t('s3empty') + '</p>');
       html += step(4, t('s4'), t('s4a'), '<p class="empty">' + t('s3empty') + '</p>');
     }
     body.innerHTML = html + '<p class="assume">' + t('assume') + '</p>';
     const bc = $('brain-cmp'); if (bc) bc.onclick = () => openAlgos();
   }
 
-  function predictAt(lon, lat) {
+  async function predictAt(lon, lat) {
+    const [r0, q0] = tileKey(lon, lat).split('_').map(Number);
+    const near = [];
+    for (let r = r0 - 1; r <= r0 + 1; r++) for (let q = q0 - 1; q <= q0 + 1; q++) near.push(loadTile(r + '_' + q));
     let best = null, bd = Infinity;
-    for (const e of S.city.edges) { const d = ((e.c[0] - lon) * 0.63) ** 2 + (e.c[1] - lat) ** 2; if (d < bd) { bd = d; best = e; } }
-    const risk = S.risk[best.i] / 100;
+    (await Promise.all(near)).forEach((f) => { if (f) f.mid.forEach((c, i) => { const d = ((c[0] - lon) * 0.63) ** 2 + (c[1] - lat) ** 2; if (d < bd) { bd = d; best = f[i]; } }); });
+    const risk = best && S.riskTable ? S.riskTable[best.properties.m] / 100 : 0;
     return { risk, pred: risk >= 0.5 ? 'ice' : risk >= 0.25 ? 'packed' : 'dry' };
   }
 
@@ -621,8 +680,8 @@
       const col = { ice: 'var(--bad)', packed: 'var(--warn)', dry: 'var(--ok)' };
       pop.innerHTML = ['ice', 'packed', 'dry'].map((c) => '<button data-c="' + c + '"><i style="background:' + col[c] + '"></i>' + t('m_' + c) + '</button>').join('');
       pop.hidden = false;
-      pop.querySelectorAll('button').forEach((b) => { b.onclick = () => {
-        const pr = predictAt(lon, lat);
+      pop.querySelectorAll('button').forEach((b) => { b.onclick = async () => {
+        const pr = await predictAt(lon, lat);
         S.marks.push({ t: new Date().toISOString(), lon: +lon.toFixed(5), lat: +lat.toFixed(5), actual: b.dataset.c, pred: pr.pred, risk: +pr.risk.toFixed(2), scenario: S.args.scenario });
         store.set('boran.marks', S.marks); pop.hidden = true; toast(t('m_saved')); pushMarks();
         if (!$('marks').hidden) renderMarks();

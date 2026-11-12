@@ -38,7 +38,7 @@ window.I18N = {
     aw_astar: 'f = g + h: пройденная стоимость плюс расстояние по прямой до цели. Путь такой же оптимальный, как у UCS, но узлов раскрыто меньше.',
     cafe: 'кафе', stop: 'остановка', search_ph: 'Поиск: Хан Шатыр, Mega, улица…', searching: 'Ищу…', notfound: 'Ничего не нашлось в районе карты',
     geo_me: 'Моё местоположение', geo_no: 'Браузер не умеет определять местоположение', geo_wait: 'Определяю местоположение…',
-    geo_out: 'Ты вне зоны карты: сейчас она покрывает левый берег от кампуса до общежития', geo_denied: 'Доступ к геолокации запрещён в настройках браузера', geo_fail: 'Не удалось определить местоположение',
+    geo_out: 'Ты вне Астаны: карта покрывает город в пределах кольцевой дороги', geo_denied: 'Доступ к геолокации запрещён в настройках браузера', geo_fail: 'Не удалось определить местоположение',
     brain_cmp: 'Сравнить A* с BFS, DFS, UCS и Greedy',
   },
   kk: {
@@ -80,7 +80,7 @@ window.I18N = {
     aw_astar: 'f = g + h: жүрілген құн мен мақсатқа дейінгі түзу қашықтық. Жолы UCS сияқты оңтайлы, бірақ аз түйін ашады.',
     cafe: 'кафе', stop: 'аялдама', search_ph: 'Іздеу: Хан Шатыр, Mega, көше…', searching: 'Іздеп жатырмын…', notfound: 'Карта аумағында ештеңе табылмады',
     geo_me: 'Менің орным', geo_no: 'Браузер орынды анықтай алмайды', geo_wait: 'Орынды анықтап жатырмын…',
-    geo_out: 'Сен карта аумағынан тыссың: қазір ол кампустан жатақханаға дейінгі сол жағалауды қамтиды', geo_denied: 'Браузер баптауларында геолокацияға тыйым салынған', geo_fail: 'Орынды анықтау мүмкін болмады',
+    geo_out: 'Сен Астанадан тыссың: карта қаланы айналма жол шегінде қамтиды', geo_denied: 'Браузер баптауларында геолокацияға тыйым салынған', geo_fail: 'Орынды анықтау мүмкін болмады',
     brain_cmp: 'A*-ты BFS, DFS, UCS және Greedy-мен салыстыру',
   },
   en: {
@@ -122,7 +122,7 @@ window.I18N = {
     aw_astar: 'f = g + h: cost so far plus straight-line distance to the goal. As optimal as UCS, with fewer nodes expanded.',
     cafe: 'cafe', stop: 'bus stop', search_ph: 'Search: Khan Shatyr, Mega, a street…', searching: 'Searching…', notfound: 'Nothing found in the map area',
     geo_me: 'My location', geo_no: 'This browser cannot detect location', geo_wait: 'Detecting your location…',
-    geo_out: 'You are outside the map area: it covers the left bank from the campus to the dorm', geo_denied: 'Location access is blocked in browser settings', geo_fail: 'Could not detect your location',
+    geo_out: 'You are outside Astana: the map covers the city inside the ring road', geo_denied: 'Location access is blocked in browser settings', geo_fail: 'Could not detect your location',
     brain_cmp: 'Compare A* with BFS, DFS, UCS and Greedy',
   },
 };

@@ -17,6 +17,7 @@ WALK = "primary|secondary|tertiary|residential|living_street|pedestrian|footway|
 CLEANED = {"primary", "secondary", "tertiary", "pedestrian"}
 BIG = {"primary", "secondary"}
 FEATURE_BITS = {"shade": 1, "open": 2, "uncleaned": 4, "stop": 8, "bridge": 16}
+CELL = (0.02, 0.03)
 
 
 def overpass(query, timeout=100):
@@ -272,19 +273,31 @@ class City:
 
     def stops_near(self, lon, lat, k=5, r=1200.0):
         x, y = self.proj.xy(lon, lat)
-        found = sorted(self.sgrid.near(x, y, r), key=lambda t: t[0])
-        return [i for _, i in found[:k]]
+        for radius in (r, r * 2, r * 4):
+            found = sorted(self.sgrid.near(x, y, radius), key=lambda t: t[0])
+            if found:
+                return [i for _, i in found[:k]]
+        return []
 
-    def frontend(self):
+    def frontend(self, cell=CELL):
         d = self.data
-        return {
+        s, w, n, e = d["bbox"]
+        tiles = {}
+        for ed in d["edges"]:
+            mid = ed["p"][len(ed["p"]) // 2]
+            key = f"{int((mid[1] - s) // cell[0])}_{int((mid[0] - w) // cell[1])}"
+            tiles.setdefault(key, []).append([ed["p"], ed["mask"] & 31, 1 if ed["hw"] in BIG else 0])
+        meta = {
             "demo": d.get("demo", False),
             "bbox": d["bbox"],
-            "edges": [{"p": ed["p"], "m": ed["mask"], "w": 1 if ed["warm"] else 0, "b": 1 if ed["hw"] in BIG else 0} for ed in d["edges"]],
+            "cell": list(cell),
+            "tiles": sorted(tiles),
+            "stats": {"nodes": len(self.nodes), "edges": len(self.edges)},
             "water": d["water"],
             "stops": d["stops"],
             "warm": d["warm"],
         }
+        return meta, tiles
 
 
 def data_path():

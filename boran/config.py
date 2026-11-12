@@ -1,4 +1,4 @@
-BBOX = (51.078, 71.398, 51.136, 71.505)
+BBOX = (51.04, 71.28, 51.22, 71.62)
 CITY = (51.1283, 71.4305)
 TZ = "Asia/Almaty"
 
@@ -11,6 +11,12 @@ PLACES = [
      "name": {"ru": "Байтерек", "kk": "Бәйтерек", "en": "Baiterek"}},
     {"id": "khanshatyr", "lat": 51.1323, "lon": 71.4036, "kind": "landmark",
      "name": {"ru": "Хан Шатыр", "kk": "Хан Шатыр", "en": "Khan Shatyr"}},
+    {"id": "mosque", "lat": 51.0758, "lon": 71.4146, "kind": "landmark",
+     "name": {"ru": "Мечеть Астана", "kk": "Астана мешіті", "en": "Astana Grand Mosque"}},
+    {"id": "station", "lat": 51.1328, "lon": 71.3970, "kind": "landmark",
+     "name": {"ru": "Вокзал Нурлы Жол", "kk": "Нұрлы Жол вокзалы", "en": "Nurly Zhol station"}},
+    {"id": "pyramid", "lat": 51.1236, "lon": 71.4636, "kind": "landmark",
+     "name": {"ru": "Дворец мира и согласия", "kk": "Бейбітшілік және келісім сарайы", "en": "Palace of Peace"}},
 ]
 
 WALK_SPEED = 1.25

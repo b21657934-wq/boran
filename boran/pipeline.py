@@ -8,7 +8,7 @@ def analyse(city, weather):
     table = bayes.risk_table(prior)
     risks = [table[ed["mask"] & 31] for ed in city.edges]
     wind_k = min(1.0, weather["now"]["wind"] / 15.0)
-    return {"hmm": h, "prior": prior, "risks": risks, "wind_k": wind_k}
+    return {"hmm": h, "prior": prior, "risks": risks, "wind_k": wind_k, "table": [table[m] for m in range(32)]}
 
 
 def _leg(city, a, b, an, safe=True):
