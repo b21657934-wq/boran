@@ -45,7 +45,8 @@
       S.cityVersion = args.cityVersion;
       S.city = args.city || await fetch('city.json?v=' + args.cityVersion).then((r) => r.json());
       S.tileSet = new Set(S.city.tiles); S.tiles = new Map(); S.tileReq = new Map(); S.tileShown = '';
-      if (S.city.inline) for (const k in S.city.inline) S.tiles.set(k, tileFeats(S.city.inline[k]));
+      S.big = null; S.bigReq = null;
+      if (S.city.inline) { for (const k in S.city.inline) S.tiles.set(k, tileFeats(S.city.inline[k])); S.big = tileFeats([].concat(...Object.values(S.city.inline)).filter((x) => x[2] === 1)); }
       S.riskTable = args.riskTable;
       await initMap();
     }
@@ -200,11 +201,20 @@
     S.tileReq.set(k, pr);
     return pr;
   }
+  function loadBig() {
+    if (S.big || S.bigReq) return S.bigReq || Promise.resolve(S.big);
+    const v = S.cityVersion;
+    S.bigReq = fetch('tiles/' + v + '/big.json').then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then((arr) => { if (v === S.cityVersion) S.big = tileFeats(arr); S.bigReq = null; return S.big; })
+      .catch(() => { S.bigReq = null; return null; });
+    return S.bigReq;
+  }
   function viewTiles() {
-    if (!map || !S.city || map.getZoom() < TILE_Z) return { keys: [], low: true };
-    const z = map.getZoom(), low = z < DETAIL_Z, b = map.getBounds(), c = map.getCenter();
+    if (!map || !S.city || map.getZoom() < TILE_Z) return { keys: [], low: true, off: true };
+    if (map.getZoom() < DETAIL_Z) return { keys: [], low: true };
+    const b = map.getBounds(), c = map.getCenter();
     const [s, w, n, e] = S.city.bbox, [dy, dx] = S.city.cell;
-    const rad = low ? 9 : 2.6;
+    const rad = 2.6, low = false;
     const lo = Math.max(s, b.getSouth(), c.lat - rad * dy), hi = Math.min(n, b.getNorth(), c.lat + rad * dy);
     const le = Math.max(w, b.getWest(), c.lng - rad * dx), ri = Math.min(e, b.getEast(), c.lng + rad * dx);
     const keys = [];
@@ -214,7 +224,8 @@
     return { keys, low };
   }
   function riskFeatures() {
-    const { keys, low } = S.view || { keys: [], low: true };
+    const { keys, low, off } = S.view || { keys: [], low: true, off: true };
+    if (low) return FC(!off && S.big ? S.big : []);
     const out = [];
     for (const k of keys) { const f = S.tiles.get(k); if (f) { const L = low ? f.big : f; for (let i = 0; i < L.length; i++) out.push(L[i]); } }
     return FC(out);
@@ -222,8 +233,8 @@
   let tileTimer = null;
   function showTiles() {
     tileTimer = null;
-    const v = S.view || { keys: [] };
-    const sig = (v.low ? 'L' : 'H') + v.keys.filter((k) => S.tiles.has(k)).join(',');
+    const v = S.view || { keys: [], low: true, off: true };
+    const sig = v.low ? (v.off ? 'O' : 'L' + (S.big ? 1 : 0)) : 'H' + v.keys.filter((k) => S.tiles.has(k)).join(',');
     if (sig === S.tileShown) return;
     S.tileShown = sig;
     const s = src('b-risk'); if (s) s.setData(riskFeatures());
@@ -231,6 +242,7 @@
   function refreshTiles() {
     if (!map || !S.city) return;
     S.view = viewTiles();
+    if (S.view.low && !S.view.off && !S.big) loadBig().then(() => { if (!tileTimer) tileTimer = setTimeout(showTiles, 80); });
     const wait = S.view.keys.filter((k) => !S.tiles.has(k));
     wait.forEach((k) => loadTile(k).then(() => { if (!tileTimer) tileTimer = setTimeout(showTiles, 80); }));
     showTiles();
