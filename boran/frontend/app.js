@@ -94,7 +94,7 @@
       water: '#CBDDEA', iceCrack: '#A6C2D6', iceShine: '#EAF3F9', waterLine: '#B6CEDF',
       road: '#A9B3BE', sec: '#808C9A', major: '#5A6573', casing: '#F1F4F7', majorCasing: '#F1F4F7', path: '#C8D0D8', rail: '#B0BAC5',
       bld2d: '#E0E6EC', bldOutline: '#CCD5DE', bld3d: '#F5F8FA', bldTall: '#D2DDE8', text: '#1F2A37', poiText: '#5B6878', waterText: '#45708E', halo: '#F1F4F7',
-      risk: ['#9AA7B6', '#F2A93B', '#E0344C'], ok: '#1FA971', heat: ['rgba(242,169,59,0.16)', 'rgba(238,128,48,0.34)', 'rgba(224,52,76,0.5)'],
+      risk: ['#9AA7B6', '#F2A93B', '#E0344C'], ok: '#1FA971', heat: ['rgba(242,169,59,0.24)', 'rgba(238,120,48,0.4)', 'rgba(224,52,76,0.56)'],
       route: '#0B7A92', routeCasing: '#FFFFFF', routeGlow: '#14A5C2', short: '#5E6B85', ride: '#6C4CE0', wave: '#0B7A92', warm: '#E8743B', worst: '#E0344C',
       light: { anchor: 'viewport', color: '#FFFFFF', intensity: 0.3, position: [1.3, 200, 35] },
       sky: { 'sky-color': '#BCD1E5', 'horizon-color': '#EEF3F7', 'fog-color': '#E7EDF3', 'fog-ground-blend': 0.5, 'horizon-fog-blend': 0.7, 'sky-horizon-blend': 0.6, 'atmosphere-blend': 0.4 },
@@ -103,10 +103,10 @@
       bg: '#0B1220', res: '#0E1626', block: '#0F1828', park: '#111C2D', tree: '#1F2E45', wood: '#121F31', woodTree: '#24364F', pitch: '#111C2D',
       water: '#122A43', iceCrack: '#24476A', iceShine: '#1A3856', waterLine: '#1D3B5B',
       road: '#283550', sec: '#34445F', major: '#4A5D7E', casing: '#0B1220', majorCasing: '#0B1220', path: '#1E2A42', rail: '#2A3550',
-      bld2d: '#151F33', bldOutline: '#1F2B44', bld3d: '#1C2740', bldTall: '#283A5C', text: '#DCE6F5', poiText: '#8A9AB8', waterText: '#6E9CC8', halo: '#0B1220',
-      risk: ['#4A5A76', '#FFB547', '#FF4D6A'], ok: '#4BE3A0', heat: ['rgba(255,181,71,0.16)', 'rgba(255,128,64,0.36)', 'rgba(255,77,106,0.56)'],
+      bld2d: '#141C2B', bldOutline: '#1E2839', bld3d: '#1A2231', bldTall: '#25334A', text: '#DCE6F5', poiText: '#8A9AB8', waterText: '#6E9CC8', halo: '#0B1220',
+      risk: ['#4A5A76', '#FFB547', '#FF4D6A'], ok: '#4BE3A0', heat: ['rgba(255,181,71,0.22)', 'rgba(255,128,64,0.4)', 'rgba(255,77,106,0.58)'],
       route: '#7FE7F5', routeCasing: '#0B1220', routeGlow: '#2CC5E0', short: '#8F9BB5', ride: '#B9A6FF', wave: '#7FE7F5', warm: '#FFB46B', worst: '#FF4D6A',
-      light: { anchor: 'viewport', color: '#9DB4FF', intensity: 0.32, position: [1.2, 210, 35] },
+      light: { anchor: 'viewport', color: '#C9D5F0', intensity: 0.3, position: [1.2, 210, 35] },
       sky: { 'sky-color': '#04070E', 'horizon-color': '#16233C', 'fog-color': '#0D1627', 'fog-ground-blend': 0.6, 'horizon-fog-blend': 0.8, 'sky-horizon-blend': 0.7, 'atmosphere-blend': 0.4 },
     },
   };
@@ -192,14 +192,15 @@
           if (id !== 'poi_r1') continue;
           delete L.layout['icon-image']; delete L.layout['text-variable-anchor'];
           L.layout['text-offset'] = [0, 0]; L.layout['text-anchor'] = 'center'; L.layout['text-size'] = 11.5;
-          L.minzoom = Math.max(L.minzoom || 0, 15.6);
+          L.minzoom = Math.max(L.minzoom || 0, 16.4);
         }
+        if (id === 'poi_transit') { L.minzoom = Math.max(L.minzoom || 0, 15); p['icon-opacity'] = night ? 0.6 : 0.8; }
         if (L.layout['text-field'] && /place|poi|transportation_name|water_name|waterway|aerodrome/.test(sl)) {
           L.layout['text-field'] = ['coalesce', ['get', nameKey], ['get', 'name:ru'], ['get', 'name'], ['get', 'name:latin']];
         }
         p['text-color'] = sl === 'water_name' || sl === 'waterway' ? P.waterText : sl === 'poi' ? P.poiText : P.text;
         p['text-halo-color'] = P.halo; p['text-halo-width'] = 1.6; delete p['text-halo-blur'];
-        if (night) p['icon-opacity'] = 0.7;
+        if (night && id !== 'poi_transit') p['icon-opacity'] = 0.7;
       }
       out.push(L);
     }
@@ -341,9 +342,9 @@
     });
     const riskColor = riskPaint(P);
     const heat = { id: 'b-heat', type: 'heatmap', source: 'b-heat', maxzoom: 14.6,
-      paint: { 'heatmap-weight': heatWeight(), 'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 10, 0.7, 14, 1.8],
-        'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 10, 7, 12, 16, 14, 42],
-        'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(0,0,0,0)', 0.18, P.heat[0], 0.5, P.heat[1], 0.9, P.heat[2]],
+      paint: { 'heatmap-weight': heatWeight(), 'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 10, 0.35, 12, 0.5, 14, 0.9],
+        'heatmap-radius': ['interpolate', ['exponential', 2], ['zoom'], 10, 16, 12, 40, 14, 110],
+        'heatmap-color': ['interpolate', ['linear'], ['heatmap-density'], 0, 'rgba(0,0,0,0)', 0.22, 'rgba(0,0,0,0)', 0.4, P.heat[0], 0.65, P.heat[1], 0.9, P.heat[2]],
         'heatmap-opacity': ['interpolate', ['linear'], ['zoom'], 12.6, 0.95, 14.4, 0] } };
     const firstRoad = st.layers.findIndex((L) => L['source-layer'] === 'transportation');
     const heatAt = firstRoad < 0 ? Math.min(1, st.layers.length) : firstRoad;
