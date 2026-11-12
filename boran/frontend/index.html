@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<title>БОРАН</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="night">
+<div id="map"></div>
+<canvas id="snow"></canvas>
+<div id="frost" aria-hidden="true"><i class="f-t"></i><i class="f-b"></i><i class="f-l"></i><i class="f-r"></i></div>
+
+<header id="top">
+  <section id="wx" class="glass" aria-live="polite">
+    <div class="wx-main">
+      <div class="wx-temp"><span id="wx-t">—</span><sup>°</sup></div>
+      <div class="wx-side">
+        <div class="wx-src" id="wx-src"></div>
+        <div class="wx-feel" id="wx-feel"></div>
+      </div>
+    </div>
+    <div class="wx-row">
+      <span class="wx-chip"><svg id="wx-arrow" viewBox="0 0 24 24" width="16" height="16"><path d="M12 3l5 9h-3.5v9h-3v-9H7z" fill="currentColor"/></svg><b id="wx-wind">—</b></span>
+      <span class="wx-chip"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v20M3.3 7l17.4 10M20.7 7L3.3 17"/></svg><b id="wx-snow">—</b></span>
+      <span class="wx-chip"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 3c4 5 6 8 6 11a6 6 0 0 1-12 0c0-3 2-6 6-11z" fill="currentColor"/></svg><b id="wx-hum">—</b></span>
+    </div>
+    <svg id="wx-spark" viewBox="0 0 240 46" preserveAspectRatio="none" aria-hidden="true"></svg>
+    <div class="wx-state" id="wx-state"></div>
+  </section>
+  <nav id="tools">
+    <button class="tool glass" id="btn-brain" aria-haspopup="dialog"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 0V7a3 3 0 0 0-3-3zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 0"/></svg><span id="t-brain"></span></button>
+    <button class="tool glass" id="btn-scn" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span id="t-scn"></span></button>
+    <button class="tool glass icon" id="btn-ice" aria-pressed="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.500C5 14.800 12 21 12 21z"/><path d="M12 6.500v6M9.400 8l5.200 3M14.600 8l-5.200 3"/></svg></button>
+    <button class="tool glass icon" id="btn-theme"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M20 14.500A8 8 0 1 1 9.500 4a6.500 6.500 0 0 0 10.500 10.500z" fill="currentColor"/></svg></button>
+    <button class="tool glass icon" id="btn-lang">RU</button>
+  </nav>
+</header>
+
+<div id="scn-menu" class="glass menu" role="menu" hidden></div>
+<div id="badge" class="glass" hidden></div>
+<div id="legend" class="glass" aria-hidden="true"><span id="t-legend"></span><i></i><em id="t-leg-lo"></em><em id="t-leg-hi"></em></div>
+
+<section id="panel" class="glass" aria-label="route">
+  <div class="handle" id="panel-handle"></div>
+  <div id="panel-body">
+    <div class="pick">
+      <button class="slot" id="slot-src"><i class="dot a"></i><span><small id="t-from"></small><b id="src-name"></b></span></button>
+      <button class="swap" id="btn-swap" aria-label="swap"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"/></svg></button>
+      <button class="slot" id="slot-dst"><i class="dot b"></i><span><small id="t-to"></small><b id="dst-name"></b></span></button>
+    </div>
+    <div id="place-list" hidden></div>
+    <button class="cta" id="btn-go"><span id="t-build"></span></button>
+    <div id="result" hidden>
+      <article id="advice" class="advice">
+        <div class="adv-eyebrow" id="adv-eyebrow"></div>
+        <h2 id="adv-title"></h2>
+        <p id="adv-why"></p>
+      </article>
+      <div id="compare"></div>
+      <button class="link" id="btn-why"></button>
+    </div>
+  </div>
+</section>
+
+<aside id="brain" class="glass" role="dialog" aria-label="AI" hidden>
+  <div class="brain-head"><h3 id="t-brain-title"></h3><button class="x" id="brain-x" aria-label="close"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <div id="brain-body"></div>
+</aside>
+
+<aside id="marks" class="glass" role="dialog" hidden>
+  <div class="brain-head"><h3 id="t-marks-title"></h3><button class="x" id="marks-x" aria-label="close"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
+  <div id="marks-body"></div>
+</aside>
+<div id="mark-pop" class="glass" hidden></div>
+<div id="toast" class="glass" hidden></div>
+
+<div id="splash">
+  <div class="sp-streaks"></div>
+  <div class="sp-frost"></div>
+  <div class="sp-center">
+    <h1 class="sp-title" aria-label="БОРАН"><span>Б</span><span>О</span><span>Р</span><span>А</span><span>Н</span></h1>
+    <div class="sp-line"></div>
+    <p class="sp-sub" id="sp-sub">Астана</p>
+  </div>
+</div>
+
+<script src="vendor/deck.min.js"></script>
+<script src="i18n.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
