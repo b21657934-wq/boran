@@ -145,7 +145,7 @@ body.day .cta{background:linear-gradient(180deg,#19A9BF,#0E8FA3)}
 .note{font-size:11.5px;color:var(--t3)}
 .link{margin-top:8px;min-height:44px;color:var(--focus);font-weight:600;font-size:14px;display:inline-flex;align-items:center;gap:6px}
 
-#brain,#marks,#algos{position:fixed;z-index:20;top:calc(var(--sat) + 12px);right:calc(var(--sar) + 12px);bottom:calc(var(--sab) + 12px);width:min(410px,92vw);border-radius:var(--r3);display:flex;flex-direction:column;animation:slide .32s var(--ease);background:var(--glass-strong)}
+#brain,#marks,#algos{position:fixed;z-index:20;top:calc(var(--sat) + 66px);right:calc(var(--sar) + 12px);bottom:calc(var(--sab) + 12px);width:min(410px,92vw);border-radius:var(--r3);display:flex;flex-direction:column;animation:slide .32s var(--ease);background:var(--glass-strong)}
 @keyframes slide{from{transform:translateX(30px);opacity:0}}
 .brain-head{display:flex;justify-content:space-between;align-items:center;padding:14px 10px 6px 18px}
 .brain-head h3{margin:0;font-size:18px;font-weight:800;letter-spacing:-.01em}

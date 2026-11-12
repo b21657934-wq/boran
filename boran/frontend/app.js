@@ -60,7 +60,7 @@
     if (args.error && S.wantRoute) toast(args.error === 'no_path' ? t('nopath') : t('err') + ' ' + args.error);
     if (args.compare && S.wantCompare && S.src && S.dst) {
       const same = args.compare.src[0].toFixed(4) === S.src.lon.toFixed(4) && args.compare.dst[0].toFixed(4) === S.dst.lon.toFixed(4);
-      if (same && S.cmp !== args.compare) { S.cmp = args.compare; S.cmpPending = false; if (!$('algos').hidden) { renderAlgos(); pushCompare(); } }
+      if (same && S.cmp !== args.compare) { S.cmp = args.compare; S.cmpPending = false; if (!$('algos').hidden) { renderAlgos(); pushCompare(); fitCompare(); } }
     }
     if (first) startSplash();
   }
@@ -232,7 +232,7 @@
         'circle-stroke-color': ['case', ['==', ['get', 'k'], 'worst'], P.worst, P.ride], 'circle-stroke-width': ['case', ['==', ['get', 'k'], 'worst'], 2.5, 3], 'circle-pitch-alignment': 'map' } },
       { id: 'b-cmp-wave', type: 'circle', source: 'b-cmp-wave', paint: { 'circle-color': '#1E88E5', 'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 1.6, 16, 3.5], 'circle-opacity': 0.55, 'circle-pitch-alignment': 'map' } },
       { id: 'b-cmp-casing', type: 'line', source: 'b-cmp', filter: ['==', ['get', 'sel'], 1], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': P.routeCasing, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 7, 17, 14] } },
-      { id: 'b-cmp', type: 'line', source: 'b-cmp', layout: { 'line-cap': 'round', 'line-join': 'round' },
+      { id: 'b-cmp', type: 'line', source: 'b-cmp', filter: ['==', ['get', 'sel'], 1], layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': ['get', 'c'], 'line-opacity': ['case', ['==', ['get', 'sel'], 1], 1, 0.45], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, ['case', ['==', ['get', 'sel'], 1], 4, 2], 17, ['case', ['==', ['get', 'sel'], 1], 9, 3.5]] } },
       { id: 'b-runner', type: 'circle', source: 'b-runner', paint: { 'circle-radius': 6, 'circle-color': '#FFFFFF', 'circle-stroke-color': P.route, 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' } },
       { id: 'b-marks', type: 'circle', source: 'b-marks', paint: { 'circle-radius': 6, 'circle-color': ['match', ['get', 'a'], 'ice', P.risk[2], 'packed', P.risk[1], P.risk[0]], 'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 1.5 } },
@@ -707,7 +707,21 @@
     }
     html += '</div><p class="assume">' + t('cmp_note') + '</p>';
     body.innerHTML = html;
-    body.querySelectorAll('.algo').forEach((b) => { b.onclick = () => { S.cmpSel = b.dataset.a; renderAlgos(); pushCompare(); }; });
+    body.querySelectorAll('.algo').forEach((b) => { b.onclick = () => { S.cmpSel = b.dataset.a; renderAlgos(); pushCompare(); fitCompare(); }; });
+  }
+
+  function fitCompare() {
+    if (!S.cmp || !map) return;
+    const r = S.cmp.results.find((x) => x.algo === S.cmpSel && x.found);
+    const pts = (r ? r.line : []).concat([S.cmp.src, S.cmp.dst]);
+    const [s, w, n, e] = S.city.bbox;
+    let x0 = 180, x1 = -180, y0 = 90, y1 = -90;
+    pts.forEach((p) => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });
+    x0 = Math.max(x0, w); x1 = Math.min(x1, e); y0 = Math.max(y0, s); y1 = Math.min(y1, n);
+    const mobile = window.innerWidth <= 760, H = window.innerHeight;
+    const padding = mobile ? { top: 120, bottom: Math.min(H * 0.6, H - 240), left: 30, right: 30 } : { top: 110, bottom: 80, left: 420, right: 460 };
+    const cam = map.cameraForBounds([[x0, y0], [x1, y1]], { padding, maxZoom: 16, bearing: -12 });
+    if (cam) map.flyTo({ center: cam.center, zoom: cam.zoom, bearing: -12, pitch: 40, duration: 1600, essential: true });
   }
 
   function openAlgos() {
@@ -719,7 +733,7 @@
       S.cmp = null; S.cmpKey = key; S.cmpPending = true; S.wantCompare = true;
       if (!S.wantRoute) S.wantRoute = true;
       renderAlgos(); send();
-    } else { renderAlgos(); pushCompare(); }
+    } else { renderAlgos(); pushCompare(); fitCompare(); }
     if (window.innerWidth <= 760) $('panel').classList.add('min');
   }
   function closeAlgos() { $('algos').hidden = true; S.cmpOpen = false; pushCompare(); }
