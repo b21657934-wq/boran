@@ -134,9 +134,9 @@
         wrap(() => { g.strokeStyle = P.iceCrack; g.lineWidth = w; g.lineCap = 'round'; g.beginPath(); pts.forEach(([px, py], k) => (k ? g.lineTo(px, py) : g.moveTo(px, py))); g.stroke(); });
       }
     } else {
-      const count = kind === 'wood' ? 70 : 26, col = kind === 'wood' ? P.woodTree : P.tree;
+      const count = kind === 'wood' ? 54 : 24, col = kind === 'wood' ? P.woodTree : P.tree;
       for (let i = 0; i < count; i++) {
-        const x = rnd() * n, y = rnd() * n, r = 1.3 + rnd() * (kind === 'wood' ? 2.4 : 1.8), al = 0.45 + rnd() * 0.45;
+        const x = rnd() * n, y = rnd() * n, r = 1.1 + rnd() * (kind === 'wood' ? 1.5 : 1.3), al = 0.3 + rnd() * 0.35;
         wrap(() => { g.globalAlpha = al; g.fillStyle = col; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); });
       }
     }
@@ -320,6 +320,12 @@
   const riskPaint = (P) => ['interpolate', ['linear'], rExpr(), 20, P.risk[0], 50, P.risk[1], 80, P.risk[2]];
   const glowFilter = () => ['all', ['>=', rExpr(), 80], ['==', ['get', 'b'], 1]];
 
+  function arrows(id, source, P) {
+    return { id, type: 'symbol', source, minzoom: 13,
+      layout: { 'symbol-placement': 'line', 'symbol-spacing': ['interpolate', ['linear'], ['zoom'], 13, 70, 17, 110], 'text-field': '›', 'text-font': ['Noto Sans Bold'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 13, 13, 17, 20], 'text-keep-upright': false, 'text-rotation-alignment': 'map', 'text-pitch-alignment': 'map', 'text-allow-overlap': true, 'text-ignore-placement': true, 'text-offset': [0, -0.08] },
+      paint: { 'text-color': isNight() ? P.bg : '#FFFFFF', 'text-opacity': 0 } };
+  }
   function addOverlay(st) {
     const P = PAL[isNight() ? 'night' : 'day'];
     const firstBld = st.layers.findIndex((L) => L.id === 'building' || L.type === 'fill-extrusion');
@@ -364,9 +370,10 @@
       { id: 'b-route-glow', type: 'line', source: 'b-route', layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': P.routeGlow, 'line-blur': 6, 'line-opacity': 0, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 10, 17, 26] } },
       { id: 'b-route-casing', type: 'line', source: 'b-route', layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-gradient': ['step', ['line-progress'], P.routeCasing, 0, 'rgba(0,0,0,0)'], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 6, 17, 13] } },
+        paint: { 'line-gradient': ['step', ['line-progress'], P.routeCasing, 0, 'rgba(0,0,0,0)'], 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 6.5, 13, 8.5, 17, 14] } },
       { id: 'b-route', type: 'line', source: 'b-route', layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-gradient': ['step', ['line-progress'], P.route, 0, 'rgba(0,0,0,0)'], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3.5, 17, 8] } },
+        paint: { 'line-gradient': ['step', ['line-progress'], P.route, 0, 'rgba(0,0,0,0)'], 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 3.8, 13, 5, 17, 9] } },
+      arrows('b-route-arrows', 'b-route', P),
       { id: 'b-wave', type: 'circle', source: 'b-wave', paint: { 'circle-color': P.wave, 'circle-radius': 3, 'circle-opacity': 0.7, 'circle-pitch-alignment': 'map' } },
       { id: 'b-points', type: 'circle', source: 'b-points', paint: {
         'circle-radius': ['case', ['==', ['get', 'k'], 'worst'], 14, 6], 'circle-color': ['case', ['==', ['get', 'k'], 'worst'], 'rgba(0,0,0,0)', isNight() ? '#0A1022' : '#FFFFFF'],
@@ -385,9 +392,10 @@
     st.layers.splice(lmAt, 0,
       { id: 'b-landmarks', type: 'fill-extrusion', source: 'b-landmarks', minzoom: 12.5, paint: { 'fill-extrusion-color': ['get', 'color'], 'fill-extrusion-base': ['get', 'base'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 1, 'fill-extrusion-vertical-gradient': true } },
       { id: 'b-ride-casing', type: 'line', source: 'b-ride', layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': P.routeCasing, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 6, 17, 12], 'line-opacity': 0 } },
+        paint: { 'line-color': P.routeCasing, 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 6, 13, 8.5, 17, 14], 'line-opacity': 0 } },
       { id: 'b-ride', type: 'line', source: 'b-ride', layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': P.ride, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 3.5, 17, 7], 'line-opacity': 0 } });
+        paint: { 'line-color': P.ride, 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 3.6, 13, 5, 17, 8.5], 'line-opacity': 0 } },
+      arrows('b-ride-arrows', 'b-ride', P));
     return st;
   }
 
@@ -528,6 +536,7 @@
       if (!S.cmpOpen) { setPaint('b-route-glow', 'line-opacity', (isNight() ? 0.55 : 0.28) * k); setPaint('b-short', 'line-opacity', 0.85 * k); }
       setPaint('b-ride', 'line-opacity', 0.95 * k);
       setPaint('b-ride-casing', 'line-opacity', 0.95 * k);
+      if (!S.cmpOpen) { setPaint('b-route-arrows', 'text-opacity', k >= 1 ? 0.95 : 0); setPaint('b-ride-arrows', 'text-opacity', k >= 1 ? 0.95 : 0); }
     }
     if (k >= 1 && S.safeLines) {
       const sec = now / 1000;
@@ -828,6 +837,7 @@
     setPaint('b-route-glow', 'line-opacity', on ? 0 : (isNight() ? 0.55 : 0.28));
     setPaint('b-short', 'line-opacity', on ? 0 : 0.85);
     setPaint('b-runner', 'circle-opacity', on ? 0 : 1);
+    setPaint('b-route-arrows', 'text-opacity', on || (S.drawK || 0) < 1 ? 0 : 0.95);
     setPaint('b-runner', 'circle-stroke-opacity', on ? 0 : 1);
   }
   function animateCompare(now) {
