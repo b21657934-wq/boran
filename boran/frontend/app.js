@@ -719,7 +719,7 @@
     pts.forEach((p) => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });
     x0 = Math.max(x0, w); x1 = Math.min(x1, e); y0 = Math.max(y0, s); y1 = Math.min(y1, n);
     const mobile = window.innerWidth <= 760, H = window.innerHeight;
-    const padding = mobile ? { top: 120, bottom: Math.min(H * 0.6, H - 240), left: 30, right: 30 } : { top: 110, bottom: 80, left: 420, right: 460 };
+    const padding = mobile ? { top: 90, bottom: H * 0.52, left: 24, right: 24 } : { top: 110, bottom: 80, left: 420, right: 460 };
     const cam = map.cameraForBounds([[x0, y0], [x1, y1]], { padding, maxZoom: 16, bearing: -12 });
     if (cam) map.flyTo({ center: cam.center, zoom: cam.zoom, bearing: -12, pitch: 40, duration: 1600, essential: true });
   }

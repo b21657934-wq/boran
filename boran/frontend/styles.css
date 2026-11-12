@@ -260,4 +260,4 @@ table.cm td.d{background:rgba(75,227,160,.18);color:var(--ok);font-weight:800}
 .algo-m{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:12.5px;color:var(--t2);font-variant-numeric:tabular-nums}
 .algo-m b{color:var(--t1)}
 .algo-why{margin:8px 0 0;font-family:Lora,Georgia,serif;font-style:italic;font-size:14px;color:var(--t1)}
-@media (max-width:760px){.fab{bottom:auto;top:calc(var(--sat) + 236px)}}
+@media (max-width:760px){.fab{bottom:auto;top:calc(var(--sat) + 236px)}#algos{max-height:50dvh}.cmp-intro{display:none}.algo{padding:9px 12px}.algo-m{margin-top:5px;font-size:12px}.algo-bar{margin-top:6px}}
