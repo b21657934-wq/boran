@@ -1,0 +1,32 @@
+name: Build Astana map data
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - tools/build_data.py
+      - boran/graph.py
+      - boran/config.py
+      - .github/workflows/city.yml
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install requests osmium
+      - run: python tools/build_data.py
+      - name: Commit data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f data/city.json.gz
+          git diff --cached --quiet && exit 0
+          git commit -m "Update Astana map data"
+          git pull --rebase origin main
+          git push origin HEAD:main

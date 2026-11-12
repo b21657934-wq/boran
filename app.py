@@ -72,9 +72,15 @@ stamp = f'{wx["date"]}{wx["now"]["time"]}{wx["source"]}'
 an = analyse(scenario, stamp)
 
 route = None
+error = None
 src, dst = state.get("src"), state.get("dst")
 if src and dst:
-    route = find_route(scenario, stamp, (round(src[0], 5), round(src[1], 5)), (round(dst[0], 5), round(dst[1], 5)))
+    try:
+        route = find_route(scenario, stamp, (round(src[0], 5), round(src[1], 5)), (round(dst[0], 5), round(dst[1], 5)))
+        if route is None:
+            error = "no_path"
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
 
 payload = {
     "n": state.get("n", 0),
@@ -87,6 +93,8 @@ payload = {
     "risk": [int(round(r * 100)) for r in an["risks"]],
     "wind_k": an["wind_k"],
     "route": route,
+    "error": error,
+    "ack": state.get("n", 0),
     "cityVersion": version,
     "city": inline_city,
     "params": {"alpha": config.ALPHA_RISK, "beta": config.BETA_WIND, "threshold": config.TRANSIT_THRESHOLD_M},

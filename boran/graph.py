@@ -19,7 +19,7 @@ BIG = {"primary", "secondary"}
 FEATURE_BITS = {"shade": 1, "open": 2, "uncleaned": 4, "stop": 8, "bridge": 16}
 
 
-def overpass(query, timeout=150):
+def overpass(query, timeout=100):
     last = None
     for attempt in range(2):
         for url in MIRRORS:
@@ -281,7 +281,6 @@ class City:
             "demo": d.get("demo", False),
             "bbox": d["bbox"],
             "edges": [{"p": ed["p"], "m": ed["mask"], "w": 1 if ed["warm"] else 0, "b": 1 if ed["hw"] in BIG else 0} for ed in d["edges"]],
-            "buildings": d["buildings"],
             "water": d["water"],
             "stops": d["stops"],
             "warm": d["warm"],
@@ -295,8 +294,10 @@ def data_path():
 def save(data, path=None):
     path = path or data_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
+    slim = {k: v for k, v in data.items() if k != "buildings"}
+    slim["n_buildings"] = len(data.get("buildings", []))
     with gzip.open(path, "wt", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+        json.dump(slim, f, ensure_ascii=False, separators=(",", ":"))
 
 
 def load(path=None):
@@ -308,16 +309,11 @@ def load(path=None):
 def get_city():
     path = data_path()
     if os.path.exists(path):
-        return City(load(path))
-    try:
-        data = build(fetch_raw())
-        if len(data["edges"]) < 200:
-            raise RuntimeError("too few streets")
         try:
-            save(data)
-        except OSError:
+            data = load(path)
+            if len(data.get("edges", [])) >= 200:
+                return City(data)
+        except Exception:
             pass
-        return City(data)
-    except Exception:
-        from . import demo
-        return City(build(demo.raw(), demo=True))
+    from . import demo
+    return City(build(demo.raw(), demo=True))
