@@ -19,11 +19,12 @@ def _leg(city, a, b, an, safe=True):
 
 
 ROADS = {"primary", "secondary", "tertiary", "unclassified", "residential", "living_street"}
+ROAD_W = {"primary": 1.0, "secondary": 1.1, "tertiary": 1.35, "unclassified": 1.8, "residential": 2.2, "living_street": 3.0}
 
 
 def _bus_path(city, an, a, b):
     for allowed in (lambda ed: ed["hw"] in ROADS, None):
-        res = astar.search(city, a, b, an["risks"], an["wind_k"], safe=False, allow=allowed)
+        res = astar.search(city, a, b, an["risks"], an["wind_k"], safe=False, allow=allowed, weight=lambda ed: ROAD_W.get(ed["hw"], 3.0))
         if res is not None:
             line = astar.describe(city, res, an["risks"], an["wind_k"])
             return line["line"], line["length"]

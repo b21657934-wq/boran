@@ -79,9 +79,9 @@
     day: {
       bg: '#F4F1EA', res: '#EFEBE3', block: '#ECE7DD', park: '#CDE6B1', wood: '#BCDDA0', pitch: '#C6E3AC', water: '#9ECDF4', waterLine: '#8EC3EF',
       road: '#FFFFFF', casing: '#DAD4C8', majorCasing: '#CBC3B5', path: '#E4DFD5', rail: '#C9C3B8', bld2d: '#E6E0D5', bldOutline: '#D3CCBF',
-      bld3d: '#F1ECE3', text: '#3D3D3D', poiText: '#666058', waterText: '#3C7DC0', halo: '#FFFFFF',
+      bld3d: '#F2EFE9', text: '#3D3D3D', poiText: '#666058', waterText: '#3C7DC0', halo: '#FFFFFF',
       risk: ['#2DBE80', '#F2A93B', '#E8414B'], route: '#1E88E5', routeCasing: '#FFFFFF', routeGlow: '#1E88E5', short: '#5E6B85', ride: '#F07A1A', wave: '#1E88E5', warm: '#F07A1A', worst: '#E8414B',
-      light: { anchor: 'viewport', color: '#FFF8EE', intensity: 0.3, position: [1.25, 195, 32] },
+      light: { anchor: 'viewport', color: '#FFFFFF', intensity: 0.32, position: [1.25, 195, 32] },
     },
     night: {
       bg: '#0A1022', res: '#0D152C', block: '#0E1630', park: '#10283A', wood: '#0F2A36', pitch: '#123044', water: '#123463', waterLine: '#1B4A85',
@@ -621,9 +621,9 @@
     let x0 = 180, x1 = -180, y0 = 90, y1 = -90;
     lines.forEach((l) => l.forEach((p) => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }));
     const mobile = window.innerWidth <= 760, H = window.innerHeight;
-    const padding = mobile ? { top: 150, bottom: Math.min(H * 0.55, H - 260), left: 30, right: 30 } : { top: 110, bottom: 70, left: 420, right: 70 };
+    const padding = mobile ? { top: 170, bottom: Math.min(H * 0.56, H - 280), left: 40, right: 40 } : { top: 130, bottom: 90, left: 460, right: 120 };
     const cam = map.cameraForBounds([[x0, y0], [x1, y1]], { padding, maxZoom: 16.4, bearing: -12 });
-    if (cam) map.flyTo({ center: cam.center, zoom: Math.min(16.4, cam.zoom + 0.35), bearing: -12, pitch: 50, duration: 2400, essential: true });
+    if (cam) map.flyTo({ center: cam.center, zoom: Math.min(16.4, cam.zoom), bearing: -12, pitch: 45, duration: 2400, essential: true });
   }
 
   function startSplash() {
