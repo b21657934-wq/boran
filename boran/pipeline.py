@@ -18,8 +18,21 @@ def _leg(city, a, b, an, safe=True):
     return res, astar.describe(city, res, an["risks"], an["wind_k"])
 
 
-ROADS = {"primary", "secondary", "tertiary", "unclassified", "residential", "living_street"}
-ROAD_W = {"primary": 1.0, "secondary": 1.1, "tertiary": 1.35, "unclassified": 1.8, "residential": 2.2, "living_street": 3.0}
+ROADS = {"trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "living_street"}
+ROAD_W = {"trunk": 1.0, "primary": 1.0, "secondary": 1.1, "tertiary": 1.35, "unclassified": 1.8, "residential": 2.2, "living_street": 3.0}
+
+
+BIG_ROADS = {"trunk", "primary", "secondary", "tertiary"}
+
+
+def _road_node(city, lon, lat, fallback, r=160.0):
+    x, y = city.proj.xy(lon, lat)
+    near = sorted(city.ngrid.near(x, y, r), key=lambda t: t[0])
+    for kinds in (BIG_ROADS, ROADS):
+        for dd, n in near:
+            if any(city.edges[ei]["hw"] in kinds for _, ei in city.adj[n]):
+                return n
+    return fallback
 
 
 def _bus_path(city, an, a, b):
@@ -27,8 +40,8 @@ def _bus_path(city, an, a, b):
         res = astar.search(city, a, b, an["risks"], an["wind_k"], safe=False, allow=allowed, weight=lambda ed: ROAD_W.get(ed["hw"], 3.0))
         if res is not None:
             line = astar.describe(city, res, an["risks"], an["wind_k"])
-            return line["line"], line["length"]
-    return None, None
+            return line["line"], line["length"], nav.leg(city, res)["segs"]
+    return None, None, []
 
 
 def _wave(city, res, cap=900):
@@ -65,12 +78,13 @@ def route(city, an, weather, src, dst):
     transit = None
     if direct > config.TRANSIT_THRESHOLD_M and city.stops:
         best = None
-        for sa in city.stops_near(*src, k=4):
+        on_road = lambda sid: _road_node(city, city.stops[sid]["lon"], city.stops[sid]["lat"], None, 90.0) is not None
+        for sa in [i for i in city.stops_near(*src, k=8) if on_road(i)][:4]:
             na = city.nearest_node(city.stops[sa]["lon"], city.stops[sa]["lat"])
             ra, da = _leg(city, a, na, an, True)
             if da is None:
                 continue
-            for sb in city.stops_near(*dst, k=4):
+            for sb in [i for i in city.stops_near(*dst, k=8) if on_road(i)][:4]:
                 if sa == sb:
                     continue
                 nb = city.nearest_node(city.stops[sb]["lon"], city.stops[sb]["lat"])
@@ -83,7 +97,16 @@ def route(city, an, weather, src, dst):
         if best:
             _, sa, sb, ra, da, rb, db, na, nb = best
             A, B = city.stops[sa], city.stops[sb]
-            ride_line, ride_m = _bus_path(city, an, na, nb)
+
+            def named(stop, near):
+                if stop.get("name"):
+                    return stop
+                rn = _road_node(city, stop["lon"], stop["lat"], near)
+                street = next((nav._name(city, city.edges[ei]) for _, ei in city.adj[rn] if nav._name(city, city.edges[ei])), "")
+                return dict(stop, name=street)
+
+            A, B = named(A, na), named(B, nb)
+            ride_line, ride_m, ride_segs = _bus_path(city, an, _road_node(city, A["lon"], A["lat"], na), _road_node(city, B["lon"], B["lat"], nb))
             if ride_line is None:
                 ride_line = [[A["lon"], A["lat"]], [B["lon"], B["lat"]]]
                 ride_m = haversine(A["lon"], A["lat"], B["lon"], B["lat"]) * 1.3
@@ -102,7 +125,8 @@ def route(city, an, weather, src, dst):
                 "wait_min": config.TRANSIT_WAIT_MIN,
                 "total_min": round(walk["minutes"] + ride_min + config.TRANSIT_WAIT_MIN, 1),
                 "wave": _wave(city, ra) + _wave(city, rb),
-                "nav": {"legs": [nav.leg(city, ra), nav.leg(city, rb)], "ride_stops": nav.ride_stops(city, ride_line, A, B)},
+                "nav": {"legs": [nav.leg(city, ra), nav.leg(city, rb)], "ride_stops": nav.ride_stops(city, ride_line, A, B),
+                        "ride_segs": [[sg[0], sg[1]] for sg in ride_segs], "ride_len": round(ride_m or 0, 1)},
                 "expanded": da["expanded"] + db["expanded"],
             }
     out["mode"] = "transit" if transit else "walk"

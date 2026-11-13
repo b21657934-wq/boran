@@ -322,15 +322,16 @@
       return out;
     }
 
-    function stopScene(F, ridePath, atEnd, stop, rnd) {
+    function stopScene(F, ridePath, atEnd, stop, rnd, lane) {
       const s = atEnd ? ridePath.len : 0;
       const p = ridePath.pos(s), t = ridePath.tangent(s, 6), r = [t[1], -t[0]], h = headingOf(t);
-      const shelter = [p[0] + r[0] * 8.2, p[1] + r[1] * 8.2];
-      const spot = [p[0] + r[0] * 6.2 - t[0] * 7, p[1] + r[1] * 6.2 - t[1] * 7];
-      const st = { shelter, spot, p, t, r, h, name: stop && stop.name ? stop.name : '', people: [] };
+      const curb = lane + 1.4;
+      const shelter = [p[0] + r[0] * (curb + 3.4), p[1] + r[1] * (curb + 3.4)];
+      const spot = [p[0] + r[0] * (curb + 1.2) - t[0] * 7, p[1] + r[1] * (curb + 1.2) - t[1] * 7];
+      const st = { shelter, spot, p, t, r, h, curb, name: stop && stop.name ? stop.name : '', people: [] };
       const n = 3 + Math.floor(rnd() * 3);
       for (let i = 0; i < n; i++) {
-        const a = (rnd() - 0.5) * 8, b = 7.3 + rnd() * 2.6;
+        const a = (rnd() - 0.5) * 8, b = curb + 1.6 + rnd() * 2.6;
         st.people.push({ p: [p[0] + t[0] * a + r[0] * b, p[1] + t[1] * a + r[1] * b], coat: COATS[Math.floor(rnd() * COATS.length)], hat: rnd() < 0.7, board: rnd() < 0.75, gone: false, ph: rnd() * 6 });
       }
       return st;
@@ -434,8 +435,12 @@
         const ridePts = tr.ride.map((p) => F.xy(p));
         const core = new Path(ridePts);
         const path = core.slice(0, core.len, 170, 170);
-        const stA = stopScene(F, path.slice(170, path.len - 170), false, tr.stops[0], rnd);
-        const stB = stopScene(F, path.slice(170, path.len - 170), true, tr.stops[1], rnd);
+        const rsegs = (tr.nav && tr.nav.ride_segs) || [], rk = core.len / Math.max(1, (tr.nav && tr.nav.ride_len) || core.len);
+        const halfAt = (sp) => { const d = (clamp(sp, 170, 170 + core.len) - 170) / rk; let hw = rsegs.length ? rsegs[0][1] : 'residential'; for (const sg of rsegs) { if (sg[0] <= d) hw = sg[1]; else break; } return HALF[hw] || 3.75; };
+        const laneAt = (sp) => { let a = 0; for (const k of [-24, -12, 0, 12, 24]) { const h = halfAt(sp + k); a += Math.max(1.9, h - 1.9); } return a / 5; };
+        path.lane = laneAt;
+        const stA = stopScene(F, path.slice(170, path.len - 170), false, tr.stops[0], rnd, laneAt(170));
+        const stB = stopScene(F, path.slice(170, path.len - 170), true, tr.stops[1], rnd, laneAt(path.len - 170));
         addWalk(tr.legs[0], tr.nav && tr.nav.legs[0], 'stop', null, stA.spot);
         phases.push({ type: 'stop', stop: stA, path, t0: null });
         phases.push({ type: 'ride', path, start: 170, end: path.len - 170, stops: ((tr.nav && tr.nav.ride_stops) || []).map((x) => Object.assign({}, x, { s: 170 + x.d * (core.len / Math.max(1, sumLen(tr.ride, F))) })), stopB: stB });
@@ -675,7 +680,7 @@
       } else if (bus.state === 'board') {
         bus.boardT += dtW;
         const door = ph.path.pos(170 + 4.5 - 1.5), r = st.r;
-        const doorPt = [door[0] + r[0] * 5.0, door[1] + r[1] * 5.0];
+        const doorPt = [door[0] + r[0] * (st.curb - 0.2), door[1] + r[1] * (st.curb - 0.2)];
         st.people.forEach((p) => {
           if (!p.board || p.gone) return;
           const d = Math.hypot(doorPt[0] - p.p[0], doorPt[1] - p.p[1]);
@@ -688,10 +693,10 @@
       }
       let hd, W = st.spot;
       if (bus.state === 'board') {
-        const dp = ph.path.pos(172.5), r = st.r, cp = ph.path.pos(167.5), door = [cp[0] + r[0] * 7.6, cp[1] + r[1] * 7.6];
+        const dp = ph.path.pos(172.5), r = st.r, cp = ph.path.pos(167.5), door = [cp[0] + r[0] * (st.curb + 2.4), cp[1] + r[1] * (st.curb + 2.4)];
         const k = Math.min(1, bus.boardT / 2.6);
         W = [st.spot[0] + (door[0] - st.spot[0]) * k, st.spot[1] + (door[1] - st.spot[1]) * k];
-        const look = [dp[0] + r[0] * 4.6, dp[1] + r[1] * 4.6];
+        const look = [dp[0] + r[0] * (st.curb - 0.6), dp[1] + r[1] * (st.curb - 0.6)];
         hd = k < 0.98 ? headingOf(unit(look[0] - W[0], look[1] - W[1])) : run.hd;
       } else if (bus.state === 'wait') hd = st.h + 14 + Math.sin(t * 0.7) * 10 - (t > 3.2 ? 150 * Math.min(1, (t - 3.2) / 1.3) : 0);
       else { const bp = ph.path.pos(bus.s - 6); hd = headingOf(unit(bp[0] - st.spot[0], bp[1] - st.spot[1])); }
@@ -715,7 +720,8 @@
       else setHud(T('n_ride'), nextStop ? T('n_next_stop', { name: nextStop.name }) : T('n_next_stop', { name: ph.stopB.name || '—' }), 'bus');
       const t = ph.path.tangent(bus.s + 10, 8), r = [t[1], -t[0]];
       const p = ph.path.pos(bus.s);
-      const W = [p[0] + r[0] * 3.6, p[1] + r[1] * 3.6];
+      const lo = ph.path.lane ? ph.path.lane(bus.s) : 3.6;
+      const W = [p[0] + r[0] * lo, p[1] + r[1] * lo];
       const a = ph.path.pos(bus.s), b = ph.path.pos(bus.s + 20);
       const hd = headingOf(unit(b[0] - a[0], b[1] - a[1]));
       run.hd = run.hd == null ? hd : run.hd + angDiff(run.hd, hd) * Math.min(1, dtW * 2.6);
@@ -761,7 +767,8 @@
       const cur = run.plan.phases[run.i];
       if (bus.on && bus.path && cur && bus.state !== 'wait' && (cur.type === 'stop' || cur.type === 'alight' || (cur.type === 'walk' && bus.state === 'leave' && bus.s < bus.path.len + 5))) {
         const path = bus.path, t = path.tangent(bus.s - 6, 6), r = [t[1], -t[0]], p = path.pos(bus.s - 6);
-        busFeats(F, [p[0] + r[0] * 3.6, p[1] + r[1] * 3.6], headingOf(t), out, bus.state === 'board' || (cur.type === 'alight' && (run.alT || 0) < 1.2));
+        const lo = path.lane ? path.lane(bus.s - 6) : 3.6;
+        busFeats(F, [p[0] + r[0] * lo, p[1] + r[1] * lo], headingOf(t), out, bus.state === 'board' || (cur.type === 'alight' && (run.alT || 0) < 1.2));
       }
       setData('n-dyn', out);
     }
