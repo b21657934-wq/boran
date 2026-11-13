@@ -25,7 +25,7 @@ def code_signature():
 
 
 CODE = code_signature()
-if getattr(boran, "_code_sig", CODE) != CODE:
+if getattr(boran, "_code_sig", None) != CODE:
     for name in _RELOAD_ORDER:
         mod = getattr(boran, name, None) or importlib.import_module("boran." + name)
         importlib.reload(mod)
