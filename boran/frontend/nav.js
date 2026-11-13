@@ -546,7 +546,7 @@
         const dist = next.s - s;
         const verb = T('t_' + next.turn);
         const sub = next.onto ? T('n_onto', { name: next.onto }) : (next.poi ? T('n_by', { name: next.poi }) : '');
-        if (dist > 220) return [T('n_straight', { m: fmtM(dist) }), sub ? T('n_then') + ' ' + verb + ' ' + sub : '', 'straight'];
+        if (dist > 220) return [T('n_straight', { m: fmtM(dist) }), T('n_then') + ' ' + verb + (sub ? ' · ' + sub : ''), 'straight'];
         return [T('n_in', { m: fmtM(dist) }) + ' ' + verb, sub, next.turn];
       }
       if (ph.kind === 'stop') return [T('n_to_stop', { m: fmtM(left) }), run.plan.phases[run.i + 1].stop.name, 'stop'];
