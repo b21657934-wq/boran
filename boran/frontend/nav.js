@@ -669,7 +669,7 @@
       const T = strings(), st = ph.stop;
       run.stopT = (run.stopT || 0) + dtW;
       const t = run.stopT, bus = run.bus;
-      if (!bus.on) { bus.on = true; bus.s = 0; bus.v = 11; bus.state = 'wait'; bus.appear = 4.6; }
+      if (!bus.on) { bus.on = true; bus.s = 90; bus.v = 11; bus.state = 'wait'; bus.appear = 4.6; }
       if (bus.state === 'wait') { setHud(T('n_wait_bus'), T('n_bus_in', { min: Math.max(1, Math.round(7 - t * 1.5)) }), 'bus'); if (t >= bus.appear) bus.state = 'come'; }
       else if (bus.state === 'come') {
         const target = 170 + 4.5;
