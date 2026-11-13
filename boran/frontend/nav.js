@@ -86,20 +86,62 @@
     const scale = plan && plan.length ? Math.max(0.5, (base.len - pre - post) / plan.length) : 1;
     const segs = (plan && plan.segs) || [];
     const hwAt = (s) => { const d = (s - pre) / scale; if (d < 0) return null; for (let i = segs.length - 1; i >= 0; i--) if (segs[i][0] <= d + 0.01) return segs[i][1]; return null; };
-    const step = 1.5, n = Math.max(2, Math.ceil(base.len / step) + 1);
-    const raw = [];
-    for (let i = 0; i < n; i++) { const hw = hwAt(Math.min(base.len, i * step)); raw.push(HALF[hw] ? HALF[hw] + 2.0 : 0); }
-    const sm = raw.map((_, i) => { let a = 0, c = 0; for (let k = -6; k <= 6; k++) { const j = i + k; if (j >= 0 && j < n) { a += raw[j]; c++; } } return a / c; });
-    const pts = [];
-    for (let i = 0; i < n; i++) {
-      const s = Math.min(base.len, i * step), p = base.pos(s), t = base.tangent(s, 4);
-      const edge = Math.min(s, base.len - s);
-      const o = sm[i] * (edge < 10 ? edge / 10 : 1);
-      pts.push([p[0] + t[1] * o, p[1] - t[0] * o]);
+    const P = base.pts, n = P.length, C = base.cum;
+    const offAt = (s) => { const hw = hwAt(s); return HALF[hw] ? HALF[hw] + 2.0 : 0; };
+    const ahead = (i) => { let j = i + 1; while (j < n - 1 && C[j] - C[i] < 2.5) j++; return j; };
+    const K = [0];
+    for (let i = 1; i < n - 1; i++) {
+      const last = K[K.length - 1];
+      if (C[i] - C[last] < 2.5 || C[n - 1] - C[i] < 2.5) continue;
+      const j = ahead(i);
+      const d0 = unit(P[i][0] - P[last][0], P[i][1] - P[last][1]), d1 = unit(P[j][0] - P[i][0], P[j][1] - P[i][1]);
+      const ang = Math.abs(angDiff(headingOf(d0), headingOf(d1)));
+      if (ang > 6 || offAt((C[last] + C[i]) / 2) !== offAt((C[i] + C[j]) / 2)) K.push(i);
     }
-    const path = new Path(pts);
-    const cumAt = (i) => path.cum[clamp(i, 0, path.cum.length - 1)];
-    const toWalk = (sb) => { const i = clamp(sb / step, 0, n - 1), i0 = Math.floor(i), i1 = Math.min(n - 1, i0 + 1); return cumAt(i0) + (cumAt(i1) - cumAt(i0)) * (i - i0); };
+    K.push(n - 1);
+    const m = K.length, dirs = [], offs = [];
+    for (let k = 0; k < m - 1; k++) {
+      const a = P[K[k]], b = P[K[k + 1]];
+      dirs.push(unit(b[0] - a[0], b[1] - a[1]));
+      offs.push(offAt((C[K[k]] + C[K[k + 1]]) / 2));
+    }
+    const right = (d) => [d[1], -d[0]];
+    const out = [];
+    for (let k = 0; k < m; k++) {
+      const Pk = P[K[k]];
+      if (k === 0 || k === m - 1) {
+        const q = k === 0 ? 0 : m - 2, r = right(dirs[q]), o = offs[q];
+        out.push([Pk[0] + r[0] * o, Pk[1] + r[1] * o]);
+        continue;
+      }
+      const tA = dirs[k - 1], tB = dirs[k], oA = offs[k - 1], oB = offs[k], nA = right(tA), nB = right(tB);
+      const pA = [Pk[0] + nA[0] * oA, Pk[1] + nA[1] * oA], pB = [Pk[0] + nB[0] * oB, Pk[1] + nB[1] * oB];
+      const cr = tA[0] * tB[1] - tA[1] * tB[0];
+      let q = null;
+      if (Math.abs(cr) > 0.1) {
+        const u = ((pB[0] - pA[0]) * tB[1] - (pB[1] - pA[1]) * tB[0]) / cr;
+        q = [pA[0] + tA[0] * u, pA[1] + tA[1] * u];
+        if (Math.hypot(q[0] - Pk[0], q[1] - Pk[1]) > 2.5 * Math.max(oA, oB) + 4) q = null;
+      }
+      if (!q) q = [(pA[0] + pB[0]) / 2, (pA[1] + pB[1]) / 2];
+      out.push(q);
+    }
+    for (let k = 1; k < m; k++) {
+      const d = dirs[k - 1], v = [out[k][0] - out[k - 1][0], out[k][1] - out[k - 1][1]];
+      if (v[0] * d[0] + v[1] * d[1] < 0) out[k] = out[k - 1].slice();
+    }
+    const wcum = [0];
+    for (let k = 1; k < m; k++) wcum.push(wcum[k - 1] + Math.hypot(out[k][0] - out[k - 1][0], out[k][1] - out[k - 1][1]));
+    const KC = K.map((i) => C[i]);
+    const path = new Path(out);
+    const toWalk = (sb) => {
+      if (sb <= 0) return 0;
+      if (sb >= base.len) return wcum[m - 1];
+      let lo = 0, hi = m - 1;
+      while (hi - lo > 1) { const md = (lo + hi) >> 1; if (KC[md] <= sb) lo = md; else hi = md; }
+      const L = KC[lo + 1] - KC[lo], f = L > 0 ? (sb - KC[lo]) / L : 0;
+      return wcum[lo] + (wcum[lo + 1] - wcum[lo]) * f;
+    };
     const at = (d) => toWalk(pre + d * scale);
     return { base, path, scale, pre, toWalk, at, hwAt };
   }
@@ -409,7 +451,14 @@
 
     function walkLines() {
       const F = run.F, out = [];
-      run.plan.phases.forEach((ph) => { if (ph.type === 'walk') out.push({ type: 'Feature', properties: { k: 'side' }, geometry: { type: 'LineString', coordinates: ph.walk.path.pts.map((p) => F.ll(p)) } }); });
+      run.plan.phases.forEach((ph) => {
+        if (ph.type !== 'walk') return;
+        const gaps = ph.crossings.map((X) => [X.sIn - 0.5, X.sOut + 0.5]).sort((x, y) => x[0] - y[0]);
+        let a = 0;
+        const piece = (u, v) => { if (v - u < 1) return; const pts = []; for (let s = u; s < v; s += 2) pts.push(F.ll(ph.walk.path.pos(s))); pts.push(F.ll(ph.walk.path.pos(v))); out.push({ type: 'Feature', properties: { k: 'side' }, geometry: { type: 'LineString', coordinates: pts } }); };
+        gaps.forEach(([u, v]) => { piece(a, Math.max(a, u)); a = Math.max(a, v); });
+        piece(a, ph.walk.path.len);
+      });
       const ph = run.plan.phases[run.i];
       if (ph && ph.type === 'walk') {
         const a = run.s, b = Math.min(ph.walk.path.len, run.s + 260), pts = [];
