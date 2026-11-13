@@ -50,7 +50,9 @@ def solve(inp, level_now, trend):
         diff = 0.0
         for k in range(MAX_WAITS, -1, -1):
             for s in LEVELS:
-                q = {"go": terminal("go", s, inp), "transit": terminal("transit", s, inp)}
+                q = {"go": terminal("go", s, inp)}
+                if inp.get("transit_ok", 1):
+                    q["transit"] = terminal("transit", s, inp)
                 if k < MAX_WAITS:
                     q["wait"] = -WAIT_MIN + GAMMA * sum(p * V[(s2, k + 1)] for p, s2 in zip(P[s], LEVELS))
                 Q[(s, k)] = q

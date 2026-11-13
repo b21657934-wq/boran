@@ -114,8 +114,16 @@ def build(raw, demo=False):
 
     stops, warm, water_lines, water_polys = [], [], [], []
     sgrid, wgrid = Grid(120.0), Grid(120.0)
+    signal_ids, zebra_ids, signal_pts = set(), set(), []
     for el in raw["misc"]:
         tags = el.get("tags", {})
+        if el.get("type") == "node" and (tags.get("highway") == "traffic_signals" or tags.get("crossing") == "traffic_signals"):
+            signal_ids.add(el.get("id"))
+            signal_pts.append((el["lon"], el["lat"]))
+            continue
+        if el.get("type") == "node" and tags.get("highway") == "crossing":
+            zebra_ids.add(el.get("id"))
+            continue
         if el.get("type") == "node":
             lon, lat = el["lon"], el["lat"]
         elif "center" in el:
@@ -156,6 +164,16 @@ def build(raw, demo=False):
             use[nid] = use.get(nid, 0) + (2 if k in (0, len(ids) - 1) else 1)
 
     node_index, nodes, edges = {}, [], []
+    names, name_index = [], {}
+
+    def name_id(tags):
+        nm = tags.get("name:ru") or tags.get("name") or ""
+        if not nm:
+            return -1
+        if nm not in name_index:
+            name_index[nm] = len(names)
+            names.append(nm)
+        return name_index[nm]
 
     def node(nid, g):
         if nid not in node_index:
@@ -165,6 +183,7 @@ def build(raw, demo=False):
 
     for ids, geom, tags in ways:
         hw = tags.get("highway")
+        nid_name = name_id(tags)
         sidewalk = tags.get("footway") == "sidewalk"
         bridge = tags.get("bridge") not in (None, "no")
         start = 0
@@ -193,8 +212,11 @@ def build(raw, demo=False):
                 if bridge:
                     mask |= FEATURE_BITS["bridge"]
                 is_warm = any(True for _ in wgrid.near(mx, my, 90.0))
-                edges.append({"u": u, "v": v, "len": length, "mask": mask, "warm": is_warm, "hw": hw,
-                              "p": [[q(g["lon"]), q(g["lat"])] for g in seg]})
+                edge = {"u": u, "v": v, "len": length, "mask": mask, "warm": is_warm, "hw": hw,
+                        "p": [[q(g["lon"]), q(g["lat"])] for g in seg]}
+                if nid_name >= 0:
+                    edge["n"] = nid_name
+                edges.append(edge)
 
     comp = _largest_component(len(nodes), edges)
     remap, new_nodes = {}, []
@@ -203,7 +225,13 @@ def build(raw, demo=False):
             remap[i] = len(new_nodes)
             new_nodes.append(nodes[i])
     edges = [dict(ed, u=remap[ed["u"]], v=remap[ed["v"]]) for ed in edges if ed["u"] in remap and ed["v"] in remap]
+    sig = sorted(remap[node_index[i]] for i in signal_ids if i in node_index and node_index[i] in remap)
+    zeb = sorted(remap[node_index[i]] for i in zebra_ids if i in node_index and node_index[i] in remap)
     return {
+        "names": names,
+        "sig": sig,
+        "zeb": zeb,
+        "sig_pts": [[q(a), q(b)] for a, b in signal_pts],
         "demo": demo,
         "bbox": list(config.BBOX),
         "nodes": [[q(a), q(b)] for a, b in new_nodes],

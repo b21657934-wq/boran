@@ -70,7 +70,7 @@ def describe(city, res, risks, wind_k):
         line.extend(pts if not line else pts[1:])
         r = risks[ei]
         length += ed["len"]
-        seconds += ed["len"] / config.WALK_SPEED * (1.0 + 0.3 * r)
+        seconds += ed["len"] / config.WALK_SPEED * (1.0 + 0.15 * r)
         no_slip *= (1.0 - 0.005 * r) ** (ed["len"] / 100.0)
         if ed["mask"] & 2:
             exposed += ed["len"]

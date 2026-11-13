@@ -63,10 +63,13 @@
     const key = args.route ? JSON.stringify([args.route.src, args.route.dst, args.scenario]) : null;
     if (key !== S.routeKey) {
       S.routeKey = key;
-      if (args.route) { S.waveT0 = performance.now(); S.routeT0 = S.waveT0 + 900; S.drawK = null; S.waveN = -1; fitRoute(args.route); $('panel').classList.remove('min'); }
+      if (args.route) {
+        S.waveT0 = performance.now(); S.routeT0 = S.waveT0 + 900; S.drawK = null; S.waveN = -1; $('panel').classList.remove('min');
+        if (S.brief && !$('brief').hidden) briefRoute(args.route); else fitRoute(args.route);
+      }
     }
     if (!S.pendingRoute || args.ack >= S.n) { S.pendingRoute = false; $('btn-go').classList.remove('busy'); }
-    if (args.error && S.wantRoute) toast(args.error === 'no_path' ? t('nopath') : t('err') + ' ' + args.error);
+    if (args.error && S.wantRoute) { toast(args.error === 'no_path' ? t('nopath') : t('err') + ' ' + args.error); if (S.brief) closeBrief(false); }
     if (args.compare && S.wantCompare && S.src && S.dst) {
       const same = args.compare.src[0].toFixed(4) === S.src.lon.toFixed(4) && args.compare.dst[0].toFixed(4) === S.dst.lon.toFixed(4);
       if (same && S.cmp !== args.compare) { S.cmp = args.compare; S.cmpPending = false; if (!$('algos').hidden) { renderAlgos(); pushCompare(); fitCompare(); } }
@@ -142,6 +145,21 @@
     }
     return g.getImageData(0, 0, n, n);
   }
+  function roadMeters(id) {
+    const m = /motorway(?!_link)/.test(id) ? 24 : /trunk_primary/.test(id) ? 19 : /secondary_tertiary/.test(id) ? 12.5 : /link/.test(id) ? 7 : /service_track/.test(id) ? 4.5 : /path_pedestrian/.test(id) ? 2.4 : /minor|street/.test(id) ? 7.5 : 0;
+    return m && /casing/.test(id) ? m + 2.2 : m;
+  }
+  function realWidth(w, m) {
+    if (!m || !Array.isArray(w) || w[0] !== 'interpolate' || !Array.isArray(w[2]) || w[2][0] !== 'zoom') return w;
+    const out = w.slice(0, 3);
+    let last = 0;
+    for (let i = 3; i < w.length - 1; i += 2) {
+      if (typeof w[i + 1] !== 'number') return w;
+      if (w[i] < 16.5) { out.push(w[i], w[i + 1]); last = w[i + 1]; }
+    }
+    for (let z = 17; z <= 24; z++) { last = Math.max(last, +(m * Math.pow(2, z) / 98325).toFixed(2)); out.push(z, last); }
+    return out;
+  }
   function restyle(base, night, lang) {
     const st = JSON.parse(JSON.stringify(base));
     const P = PAL[night ? 'night' : 'day'];
@@ -174,6 +192,7 @@
           else if (/motorway|trunk_primary/.test(id)) p['line-color'] = P.major;
           else if (/secondary_tertiary/.test(id)) p['line-color'] = P.sec;
           else p['line-color'] = P.road;
+          if (!/rail/.test(id)) p['line-width'] = realWidth(p['line-width'], roadMeters(id));
         } else if (sl === 'aeroway') p['line-color'] = P.casing;
       } else if (L.type === 'fill-extrusion') {
         p['fill-extrusion-color'] = P.bld3d;
@@ -239,6 +258,22 @@
       add(bx, by, Math.max(1.5, Math.sqrt(Math.max(0, R * R - (zm - c) ** 2))), z0, z1, '#E9B93A');
     }
     add(bx, by, 2.2, 63, 75, '#F7F7F4');
+    const nl = isNight(), ex = 71.41613, ey = 51.08893;
+    add(ex, ey, 24, 0, 12, nl ? '#25324A' : '#D7DEE6');
+    add(ex, ey, 13, 12, 22, nl ? '#2E3E5C' : '#C4CFDA');
+    const SR = 40, SC = 60, BANDS = 32, SECT = 24, k0 = 111320 * Math.cos(ey * Math.PI / 180);
+    const glassA = nl ? '#3E63B0' : '#A7C6DE', glassB = nl ? '#5577C8' : '#BBD5E8', frame = nl ? '#9B8CFF' : '#7F9DB9';
+    for (let k = 0; k < BANDS; k++) {
+      const z0 = SC - SR + (k * 2 * SR) / BANDS, z1 = z0 + (2 * SR) / BANDS, zm = (z0 + z1) / 2;
+      const r = Math.max(2, Math.sqrt(Math.max(0, SR * SR - (zm - SC) ** 2)));
+      for (let j = 0; j < SECT; j++) {
+        const a0 = (j / SECT) * Math.PI * 2, a1 = ((j + 1) / SECT) * Math.PI * 2, ring = [[ex, ey]];
+        for (let q = 0; q <= 3; q++) { const a = a0 + ((a1 - a0) * q) / 3; ring.push([ex + (Math.cos(a) * r) / k0, ey + (Math.sin(a) * r) / 110540]); }
+        ring.push([ex, ey]);
+        const col = k % 4 === 0 ? frame : (j + (k >> 2)) % 2 ? glassA : glassB;
+        f.push({ type: 'Feature', properties: { base: z0, h: z1, color: col }, geometry: { type: 'Polygon', coordinates: [ring] } });
+      }
+    }
     return FC(f);
   }
 
@@ -442,6 +477,8 @@
     map.on('click', (ev) => onMapClick({ coordinate: [ev.lngLat.lng, ev.lngLat.lat], x: ev.point.x, y: ev.point.y }));
     map.on('error', (ev) => { if (ev && ev.error && /style|layers\[/.test(String(ev.error.message))) console.warn(ev.error.message); });
     window.__map = map;
+    if (NAV) NAV.stop(true);
+    NAV = window.BoranNav ? window.BoranNav.create({ map, t, isNight, lang: () => S.lang, onStart: navStart, onExit: navExit }) : null;
     requestAnimationFrame(frame);
     if (!S.city.demo) {
       try {
@@ -606,7 +643,7 @@
     const a = S.args, wx = a.weather, now = wx.now;
     document.documentElement.lang = S.lang === 'kk' ? 'kk' : S.lang;
     $('t-brain').textContent = t('brain'); $('t-scn').textContent = t('scn'); $('t-from').textContent = t('from'); $('t-to').textContent = t('to');
-    $('t-build').textContent = t('build'); $('t-legend').textContent = t('legend'); $('t-leg-lo').textContent = t('lo'); $('t-leg-hi').textContent = t('hi');
+    $('t-build').textContent = t('build'); $('t-walk').textContent = t('walk_btn'); $('t-legend').textContent = t('legend'); $('t-leg-lo').textContent = t('lo'); $('t-leg-hi').textContent = t('hi');
     $('t-brain-title').textContent = t('brain'); $('t-marks-title').textContent = t('m_title'); $('btn-lang').textContent = t('code');
     $('btn-brain').setAttribute('aria-label', t('brain')); $('btn-scn').setAttribute('aria-label', t('scn')); $('btn-ice').setAttribute('aria-label', t('m_title'));
     $('wx-t').textContent = num(Math.round(now.temp));
@@ -926,8 +963,105 @@
     S[which] = p; S.wantRoute = false; S.cmp = null;
     $('place-list').hidden = true; renderAll();
     if (map) map.flyTo({ center: [p.lon, p.lat], zoom: Math.max(map.getZoom(), 15), duration: 1200 });
-    if (S.src && S.dst) setTimeout(() => $('btn-go').click(), 250);
+    readyPulse();
   }
+
+  function readyPulse() {
+    const b = $('btn-go');
+    b.classList.remove('ready'); void b.offsetWidth;
+    if (S.src && S.dst) b.classList.add('ready');
+  }
+  let NAV = null;
+  const NAV_HIDE = /^b-(?!landmarks|heat)/;
+  function navLayers(show) {
+    if (!map || !map.getStyle()) return;
+    map.getStyle().layers.forEach((L) => { if (NAV_HIDE.test(L.id)) map.setLayoutProperty(L.id, 'visibility', show ? 'visible' : 'none'); });
+  }
+  function navStart() { closeAlgos(); $('brain').hidden = true; $('marks').hidden = true; navLayers(false); }
+  function navExit() { navLayers(true); const r = S.wantRoute && S.args.route; if (r) fitRoute(r); renderAll(); }
+  function startWalk(r) {
+    if (!NAV || !r) return;
+    NAV.start(r);
+  }
+
+  function briefData() {
+    const w = S.args.weather, now = w.now, h = S.args.hmm;
+    const ice = Math.round(100 * ((h.now[h.states.indexOf('ice')] || 0) + 0.4 * (h.now[h.states.indexOf('packed')] || 0)));
+    const feel = Math.round(now.apparent), wind = Math.round(now.wind);
+    const head = feel <= -25 ? 'b_h_extreme' : feel <= -8 ? 'b_h_cold' : wind >= 9 ? 'b_h_wind' : ice >= 45 ? 'b_h_ice' : feel <= 2 ? 'b_h_cold' : 'b_h_mild';
+    const items = [];
+    items.push(['coat', t(feel <= -25 ? 'b_i_extreme' : feel <= -10 ? 'b_i_cold' : feel <= 0 ? 'b_i_mild' : 'b_i_light')]);
+    if (ice >= 25) items.push(['ice', t('b_i_ice', { p: ice })]);
+    if (wind >= 6) items.push(['wind', t('b_i_wind', { w: wind })]);
+    if (now.snow > 0.05) items.push(['snow', t('b_i_snow')]);
+    if (w.night) items.push(['dark', t('b_i_dark')]);
+    if (feel <= -15) items.push(['phone', t('b_i_phone')]);
+    return { now, feel, wind, ice, head, items };
+  }
+  const BRIEF_ICO = {
+    coat: '<svg viewBox="0 0 24 24"><path d="M9 3l3 2 3-2 4 3-2 4-2-1v12H9V9L7 10 5 6z"/></svg>',
+    ice: '<svg viewBox="0 0 24 24"><path d="M12 2v20M4 7l16 10M20 7L4 17"/></svg>',
+    wind: '<svg viewBox="0 0 24 24"><path d="M3 9h11a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3"/></svg>',
+    snow: '<svg viewBox="0 0 24 24"><path d="M12 3v18M5 7.5l14 9M19 7.5l-14 9"/><circle cx="12" cy="12" r="2"/></svg>',
+    dark: '<svg viewBox="0 0 24 24"><path d="M20 14A8 8 0 0 1 10 4a8 8 0 1 0 10 10z"/></svg>',
+    phone: '<svg viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/></svg>',
+    bus: '<svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="15" rx="3"/><path d="M5 11h14M8 21v-3M16 21v-3"/></svg>',
+  };
+  function openBrief() {
+    const b = $('brief');
+    clearTimeout(S.briefAuto);
+    S.brief = { t0: performance.now(), route: null, key: null };
+    renderBrief();
+    b.hidden = false;
+    requestAnimationFrame(() => requestAnimationFrame(() => b.classList.add('on')));
+  }
+  function renderBrief() {
+    if (!S.brief) return;
+    const d = briefData(), r = S.brief.route, b = $('brief');
+    const fmt = (v) => (v > 0 ? '+' : v < 0 ? '−' : '') + Math.abs(v);
+    let route = '<p class="br-route wait"><i></i>' + t('b_r_wait') + '</p>';
+    if (r) {
+      const tr = r.transit, s = r.safe, adv = r.mdp && r.mdp.best;
+      route = tr && adv === 'transit'
+        ? '<p class="br-route">' + BRIEF_ICO.bus + t('b_r_bus', { min: Math.round(tr.total_min), w: Math.round(tr.walk.minutes) }) + '</p>'
+        : '<p class="br-route">' + t('b_r_walk', { min: Math.round(s.minutes), km: (s.length / 1000).toFixed(1).replace('.', S.lang === 'en' ? '.' : ','), p: (s.fall * 100).toFixed(1).replace('.', S.lang === 'en' ? '.' : ',') }) + '</p>';
+      if (tr && adv === 'transit') d.items.push(['bus', t('b_i_bus')]);
+    }
+    b.innerHTML = '<div class="br">'
+      + '<div class="br-l"><p class="br-k">' + t('b_title') + '</p><div class="br-temp">' + fmt(Math.round(d.now.temp)) + '°</div>'
+      + '<p class="br-feels">' + t('b_feels', { t: fmt(d.feel) }) + '<br>' + t('b_wind', { w: d.wind, h: Math.round(d.now.hum) }) + '</p></div>'
+      + '<div class="br-r"><h2 class="br-h">' + t(d.head) + '</h2><ul class="br-list">'
+      + d.items.map(([k, txt], i) => '<li style="--i:' + i + '">' + BRIEF_ICO[k] + '<span>' + txt + '</span></li>').join('') + '</ul>' + route
+      + '<div class="br-act"><button class="cta br-go"' + (r ? '' : ' disabled') + '><span>' + t('b_go') + '</span><i></i></button><button class="btn2 br-map">' + t('b_map') + '</button></div></div></div>';
+    b.querySelector('.br-go').onclick = () => closeBrief(true);
+    b.querySelector('.br-map').onclick = () => closeBrief(false);
+  }
+  function briefRoute(r) {
+    if (!S.brief || $('brief').hidden) return;
+    S.brief.route = r;
+    renderBrief();
+    const wait = Math.max(1800, 5200 - (performance.now() - S.brief.t0));
+    const go = $('brief').querySelector('.br-go i');
+    if (go) go.style.animationDuration = wait + 'ms';
+    clearTimeout(S.briefAuto);
+    S.briefAuto = setTimeout(() => closeBrief(true), wait);
+  }
+  function closeBrief(go) {
+    clearTimeout(S.briefAuto);
+    const b = $('brief');
+    if (b.hidden) return;
+    const r = S.brief && S.brief.route;
+    S.brief = null;
+    b.classList.remove('on');
+    setTimeout(() => { b.hidden = true; b.innerHTML = ''; }, 450);
+    if (go && r) startWalk(r);
+    else if (r) { S.waveT0 = performance.now(); S.routeT0 = S.waveT0 + 600; S.drawK = null; S.waveN = -1; fitRoute(r); }
+  }
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    if (!$('brief').hidden) closeBrief(false);
+    else if (NAV && NAV.active()) NAV.stop();
+  });
 
   let userMarker = null;
   function locate(which) {
@@ -979,17 +1113,20 @@
 
   $('slot-src').onclick = () => openPlaces('src');
   $('slot-dst').onclick = () => openPlaces('dst');
-  $('btn-swap').onclick = () => { const a = S.src; S.src = S.dst; S.dst = a; S.wantRoute = false; S.cmp = null; renderAll(); if (S.src && S.dst) $('btn-go').click(); };
+  $('btn-swap').onclick = () => { const a = S.src; S.src = S.dst; S.dst = a; S.wantRoute = false; S.cmp = null; renderAll(); readyPulse(); };
   $('btn-go').onclick = () => {
     if (!S.src || !S.dst) { toast(t('need')); return; }
     $('place-list').hidden = true; S.picking = null;
     if (S.cmpOpen) { S.wantCompare = true; S.cmp = null; S.cmpPending = true; renderAlgos(); }
-    S.wantRoute = true; S.pendingRoute = true; S.routeKey = null; $('btn-go').classList.add('busy');
+    S.wantRoute = true; S.pendingRoute = true; S.routeKey = null; $('btn-go').classList.add('busy'); $('btn-go').classList.remove('ready');
+    if (NAV && NAV.active()) NAV.stop(true);
+    openBrief();
     send();
     clearTimeout(S.retry1); clearTimeout(S.retry2);
     S.retry1 = setTimeout(() => { if (S.pendingRoute) { toast(t('slow')); send(); } }, 9000);
-    S.retry2 = setTimeout(() => { if (S.pendingRoute) { S.pendingRoute = false; $('btn-go').classList.remove('busy'); toast(t('noanswer')); } }, 26000);
+    S.retry2 = setTimeout(() => { if (S.pendingRoute) { S.pendingRoute = false; $('btn-go').classList.remove('busy'); toast(t('noanswer')); if (S.brief) closeBrief(false); } }, 26000);
   };
+  $('btn-walk').onclick = () => { const r = S.wantRoute && S.args.route; if (r) startWalk(r); };
   $('btn-why').onclick = () => { $('marks').hidden = true; closeAlgos(); $('brain').hidden = false; renderBrain(); };
   $('btn-cmp').onclick = () => openAlgos();
   $('algos-x').onclick = () => closeAlgos();

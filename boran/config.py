@@ -19,7 +19,7 @@ PLACES = [
      "name": {"ru": "Дворец мира и согласия", "kk": "Бейбітшілік және келісім сарайы", "en": "Palace of Peace"}},
 ]
 
-WALK_SPEED = 1.25
+WALK_SPEED = 1.4
 TRANSIT_SPEED = 5.5
 TRANSIT_WAIT_MIN = 7.0
 TRANSIT_THRESHOLD_M = 2500.0

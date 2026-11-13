@@ -1,4 +1,4 @@
-from . import astar, bayes, config, hmm, mdp, search
+from . import astar, bayes, config, hmm, mdp, nav, search
 from .geo import haversine
 
 
@@ -102,6 +102,7 @@ def route(city, an, weather, src, dst):
                 "wait_min": config.TRANSIT_WAIT_MIN,
                 "total_min": round(walk["minutes"] + ride_min + config.TRANSIT_WAIT_MIN, 1),
                 "wave": _wave(city, ra) + _wave(city, rb),
+                "nav": {"legs": [nav.leg(city, ra), nav.leg(city, rb)], "ride_stops": nav.ride_stops(city, ride_line, A, B)},
                 "expanded": da["expanded"] + db["expanded"],
             }
     out["mode"] = "transit" if transit else "walk"
@@ -109,6 +110,7 @@ def route(city, an, weather, src, dst):
     out["short"] = short
     out["transit"] = transit
     out["wave"] = _wave(city, safe_res)
+    out["nav"] = nav.leg(city, safe_res)
     out["expanded_short"] = short["expanded"]
 
     path_edges = safe_res["edges"]
@@ -126,7 +128,7 @@ def route(city, an, weather, src, dst):
     else:
         ride, access, arisk = safe["length"] / config.TRANSIT_SPEED / 60.0, 6.0, safe["fall"] * 0.25
     inp = {"walk_min": safe["minutes"], "walk_risk": safe["fall"], "ride_min": ride, "access_min": access,
-           "access_risk": arisk, "cold_factor": cf}
+           "access_risk": arisk, "cold_factor": cf, "transit_ok": 1 if transit else 0}
     out["mdp"] = mdp.solve(inp, mdp.level(sev), trend)
     return out
 

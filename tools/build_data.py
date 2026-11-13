@@ -27,6 +27,9 @@ def from_pbf(path):
                 return
             if t.get("highway") == "bus_stop" or t.get("shop") == "mall" or t.get("amenity") in ("cafe", "fast_food"):
                 self.misc.append({"type": "node", "id": o.id, "lon": o.location.lon, "lat": o.location.lat, "tags": dict(t)})
+            elif t.get("highway") in ("traffic_signals", "crossing") or t.get("crossing") == "traffic_signals":
+                self.misc.append({"type": "node", "id": o.id, "lon": o.location.lon, "lat": o.location.lat,
+                                  "tags": {k: t.get(k) for k in ("highway", "crossing") if t.get(k)}})
 
         def way(self, o):
             t = o.tags

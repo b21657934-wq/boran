@@ -59,11 +59,14 @@
         <h2 id="adv-title"></h2>
         <p id="adv-why"></p>
       </article>
+      <button class="cta walk" id="btn-walk"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg><span id="t-walk"></span></button>
       <div id="compare"></div>
       <div class="row2"><button class="link" id="btn-why"></button><button class="link" id="btn-cmp"></button></div>
     </div>
   </div>
 </section>
+
+<div id="brief" role="dialog" aria-modal="true" hidden></div>
 
 <aside id="brain" class="glass" role="dialog" aria-label="AI" hidden>
   <div class="brain-head"><h3 id="t-brain-title"></h3><button class="x" id="brain-x" aria-label="close"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
@@ -94,6 +97,7 @@
 
 <script src="vendor/maplibre-gl.js"></script>
 <script src="i18n.js"></script>
+<script src="nav.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
