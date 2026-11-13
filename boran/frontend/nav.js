@@ -1,7 +1,7 @@
 (function () {
   const EC = 40075016.686;
   const RAD = Math.PI / 180;
-  const HALF = { trunk: 11, primary: 7.5, secondary: 7, tertiary: 4, unclassified: 3.5, residential: 3.5, living_street: 3, service: 2.5 };
+  const HALF = { trunk: 11, primary: 9.5, secondary: 7.5, tertiary: 6, unclassified: 3.75, residential: 3.75, living_street: 3.75, service: 2.25 };
   const TRAFFIC = { trunk: 3, primary: 2, secondary: 2, tertiary: 1 };
   const VMAX = { trunk: 16, primary: 14, secondary: 13, tertiary: 10 };
   const CAR_COLS = ['#F4F5F7', '#C9CFD6', '#2A2E35', '#1F3A5F', '#8E1B24', '#E8B22E', '#5B6B7A', '#E9EDF1', '#3B4A3F', '#B9BEC4'];
@@ -88,7 +88,7 @@
     const hwAt = (s) => { const d = (s - pre) / scale; if (d < 0) return null; for (let i = segs.length - 1; i >= 0; i--) if (segs[i][0] <= d + 0.01) return segs[i][1]; return null; };
     const step = 1.5, n = Math.max(2, Math.ceil(base.len / step) + 1);
     const raw = [];
-    for (let i = 0; i < n; i++) { const hw = hwAt(Math.min(base.len, i * step)); raw.push(HALF[hw] ? HALF[hw] + 1.6 : 0); }
+    for (let i = 0; i < n; i++) { const hw = hwAt(Math.min(base.len, i * step)); raw.push(HALF[hw] ? HALF[hw] + 2.0 : 0); }
     const sm = raw.map((_, i) => { let a = 0, c = 0; for (let k = -6; k <= 6; k++) { const j = i + k; if (j >= 0 && j < n) { a += raw[j]; c++; } } return a / c; });
     const pts = [];
     for (let i = 0; i < n; i++) {
@@ -598,7 +598,8 @@
         hd = headingOf(unit(b[0] - a[0], b[1] - a[1]));
       }
       run.hd = run.hd == null ? hd : run.hd + angDiff(run.hd, hd) * Math.min(1, dtW * (hold ? 2.2 : 3.2));
-      run.cam = { W, hd: run.hd, A: 2.3, th: 79, back: 0.6 };
+      if (!hold) run.stepPh = (run.stepPh || 0) + (WALK * BASE * dtw / 0.75) * Math.PI;
+      run.cam = { W, hd: run.hd, A: 2.3 + (hold ? 0 : Math.abs(Math.sin(run.stepPh || 0)) * 0.05), th: 79, back: 0.6 };
       if (run.s >= ph.walk.path.len - 0.05) return true;
       return false;
     }

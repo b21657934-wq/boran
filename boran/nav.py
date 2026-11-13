@@ -3,8 +3,8 @@ import math
 from .geo import Grid
 
 CARS = {"primary": 2, "secondary": 2, "tertiary": 1, "trunk": 3}
-HALF = {"trunk": 11.0, "primary": 7.5, "secondary": 7.0, "tertiary": 4.0, "unclassified": 3.5, "residential": 3.5,
-        "living_street": 3.0, "service": 2.5}
+HALF = {"trunk": 11.0, "primary": 9.5, "secondary": 7.5, "tertiary": 6.0, "unclassified": 3.75, "residential": 3.75,
+        "living_street": 3.75, "service": 2.25}
 RANK = {"trunk": 4, "primary": 3, "secondary": 2, "tertiary": 1}
 
 

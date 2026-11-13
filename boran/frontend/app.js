@@ -146,18 +146,31 @@
     return g.getImageData(0, 0, n, n);
   }
   function roadMeters(id) {
-    const m = /motorway(?!_link)/.test(id) ? 24 : /trunk_primary/.test(id) ? 19 : /secondary_tertiary/.test(id) ? 12.5 : /link/.test(id) ? 7 : /service_track/.test(id) ? 4.5 : /path_pedestrian/.test(id) ? 2.4 : /minor|street/.test(id) ? 7.5 : 0;
-    return m && /casing/.test(id) ? m + 2.2 : m;
+    const c = /casing/.test(id) ? 2.4 : 0;
+    if (/motorway(?!_link)/.test(id)) return [24 + c];
+    if (/trunk_primary/.test(id)) return [19 + c, { trunk: 22 + c }];
+    if (/secondary_tertiary/.test(id)) return [12 + c, { secondary: 15 + c }];
+    if (/link/.test(id)) return [7 + c];
+    if (/service_track/.test(id)) return [4.5 + c];
+    if (/path_pedestrian/.test(id)) return [2.4];
+    if (/minor|street/.test(id)) return [7.5 + c];
+    return null;
   }
-  function realWidth(w, m) {
-    if (!m || !Array.isArray(w) || w[0] !== 'interpolate' || !Array.isArray(w[2]) || w[2][0] !== 'zoom') return w;
+  function realWidth(w, spec) {
+    if (!spec || !Array.isArray(w) || w[0] !== 'interpolate' || !Array.isArray(w[2]) || w[2][0] !== 'zoom') return w;
+    const [m, by] = spec, px = (v, z) => +(v * Math.pow(2, z) / 98325).toFixed(2);
     const out = w.slice(0, 3);
     let last = 0;
     for (let i = 3; i < w.length - 1; i += 2) {
       if (typeof w[i + 1] !== 'number') return w;
       if (w[i] < 16.5) { out.push(w[i], w[i + 1]); last = w[i + 1]; }
     }
-    for (let z = 17; z <= 24; z++) { last = Math.max(last, +(m * Math.pow(2, z) / 98325).toFixed(2)); out.push(z, last); }
+    for (let z = 17; z <= 24; z++) {
+      const base = Math.max(last, px(m, z));
+      if (by) { const mt = ['match', ['get', 'class']]; for (const k in by) mt.push(k, Math.max(last, px(by[k], z))); mt.push(base); out.push(z, mt); }
+      else out.push(z, base);
+      last = base;
+    }
     return out;
   }
   function restyle(base, night, lang) {
@@ -193,6 +206,7 @@
           else if (/secondary_tertiary/.test(id)) p['line-color'] = P.sec;
           else p['line-color'] = P.road;
           if (!/rail/.test(id)) p['line-width'] = realWidth(p['line-width'], roadMeters(id));
+          if (/path_pedestrian/.test(id) && !/casing/.test(id)) delete p['line-dasharray'];
         } else if (sl === 'aeroway') p['line-color'] = P.casing;
       } else if (L.type === 'fill-extrusion') {
         p['fill-extrusion-color'] = P.bld3d;
@@ -972,7 +986,7 @@
     if (S.src && S.dst) b.classList.add('ready');
   }
   let NAV = null;
-  const NAV_HIDE = /^b-(?!landmarks|heat)/;
+  const NAV_HIDE = /^b-(?!landmarks|heat)|^highway-name|^road_one_way|^poi_/;
   function navLayers(show) {
     if (!map || !map.getStyle()) return;
     map.getStyle().layers.forEach((L) => { if (NAV_HIDE.test(L.id)) map.setLayoutProperty(L.id, 'visibility', show ? 'visible' : 'none'); });
