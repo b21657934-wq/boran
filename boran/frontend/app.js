@@ -199,7 +199,7 @@
         p['fill-extrusion-vertical-gradient'] = true;
         L.minzoom = 12.6;
         p['fill-extrusion-opacity'] = ['interpolate', ['linear'], ['zoom'], 12.6, 0, 13.4, 1];
-        const tall = ['>=', ['coalesce', ['get', 'render_height'], 0], 48], f0 = L.filter;
+        const tall = ['>=', ['coalesce', ['get', 'render_height'], 0], 48], f0 = ['all', ...(L.filter ? [L.filter] : []), ['>', ['distance', { type: 'Point', coordinates: [71.41613, 51.08893] }], 24]];
         L.filter = f0 ? ['all', f0, ['!', tall]] : ['!', tall];
         out.push(L);
         const T = JSON.parse(JSON.stringify(L));
