@@ -664,7 +664,7 @@
       const T = strings(), st = ph.stop;
       run.stopT = (run.stopT || 0) + dtW;
       const t = run.stopT, bus = run.bus;
-      if (!bus.on) { bus.on = true; bus.s = 0; bus.v = 11; bus.state = 'wait'; bus.appear = 3.0; }
+      if (!bus.on) { bus.on = true; bus.s = 0; bus.v = 11; bus.state = 'wait'; bus.appear = 4.6; }
       if (bus.state === 'wait') { setHud(T('n_wait_bus'), T('n_bus_in', { min: Math.max(1, Math.round(7 - t * 1.5)) }), 'bus'); if (t >= bus.appear) bus.state = 'come'; }
       else if (bus.state === 'come') {
         const target = 170 + 4.5;
@@ -684,16 +684,16 @@
           p.p = [p.p[0] + (doorPt[0] - p.p[0]) * k, p.p[1] + (doorPt[1] - p.p[1]) * k];
         });
         setHud(T('n_board'), st.name, 'bus');
-        if (bus.boardT > 3.2) { bus.state = 'go'; return true; }
+        if (bus.boardT > 3.8) { bus.state = 'go'; return true; }
       }
       let hd, W = st.spot;
       if (bus.state === 'board') {
-        const dp = ph.path.pos(172.5), r = st.r, door = [dp[0] + r[0] * 6.0, dp[1] + r[1] * 6.0];
+        const dp = ph.path.pos(172.5), r = st.r, cp = ph.path.pos(167.5), door = [cp[0] + r[0] * 7.6, cp[1] + r[1] * 7.6];
         const k = Math.min(1, bus.boardT / 2.6);
         W = [st.spot[0] + (door[0] - st.spot[0]) * k, st.spot[1] + (door[1] - st.spot[1]) * k];
         const look = [dp[0] + r[0] * 4.6, dp[1] + r[1] * 4.6];
         hd = k < 0.98 ? headingOf(unit(look[0] - W[0], look[1] - W[1])) : run.hd;
-      } else if (bus.state === 'wait') hd = st.h + 14 + Math.sin(t * 0.7) * 10 - (t > 1.6 ? 150 * Math.min(1, (t - 1.6) / 1.2) : 0);
+      } else if (bus.state === 'wait') hd = st.h + 14 + Math.sin(t * 0.7) * 10 - (t > 3.2 ? 150 * Math.min(1, (t - 3.2) / 1.3) : 0);
       else { const bp = ph.path.pos(bus.s - 6); hd = headingOf(unit(bp[0] - st.spot[0], bp[1] - st.spot[1])); }
       run.hd = run.hd == null ? hd : run.hd + angDiff(run.hd, hd) * Math.min(1, dtW * 2);
       run.cam = { W, hd: run.hd, A: 2.2, th: 79, back: 0.4 };
