@@ -6,7 +6,30 @@ import shutil
 import streamlit as st
 import streamlit.components.v1 as components
 
+import importlib
+import glob
+
+import boran
 from boran import config, graph, pipeline, weather
+
+_BORAN_DIR = os.path.dirname(os.path.abspath(boran.__file__))
+_RELOAD_ORDER = ["geo", "config", "hmm", "bayes", "astar", "search", "mdp", "nav", "weather", "demo", "graph", "pipeline"]
+
+
+def code_signature():
+    h = hashlib.md5()
+    for path in sorted(glob.glob(os.path.join(_BORAN_DIR, "*.py"))):
+        with open(path, "rb") as f:
+            h.update(f.read())
+    return h.hexdigest()[:10]
+
+
+CODE = code_signature()
+if getattr(boran, "_code_sig", CODE) != CODE:
+    for name in _RELOAD_ORDER:
+        mod = getattr(boran, name, None) or importlib.import_module("boran." + name)
+        importlib.reload(mod)
+boran._code_sig = CODE
 
 st.set_page_config(page_title="БОРАН · Астана", page_icon="❄️", layout="wide", initial_sidebar_state="collapsed")
 
@@ -31,9 +54,9 @@ def data_signature():
     path = graph.data_path()
     try:
         stt = os.stat(path)
-        return f"{int(stt.st_mtime)}-{stt.st_size}"
+        return f"{int(stt.st_mtime)}-{stt.st_size}-{CODE}"
     except OSError:
-        return "demo"
+        return "demo-" + CODE
 
 
 @st.cache_resource(show_spinner=False, max_entries=2)
