@@ -326,11 +326,11 @@
       const s = atEnd ? ridePath.len : 0;
       const p = ridePath.pos(s), t = ridePath.tangent(s, 6), r = [t[1], -t[0]], h = headingOf(t);
       const shelter = [p[0] + r[0] * 8.2, p[1] + r[1] * 8.2];
-      const spot = [p[0] + r[0] * 6.4 - t[0] * 1.5, p[1] + r[1] * 6.4 - t[1] * 1.5];
+      const spot = [p[0] + r[0] * 6.2 - t[0] * 7, p[1] + r[1] * 6.2 - t[1] * 7];
       const st = { shelter, spot, p, t, r, h, name: stop && stop.name ? stop.name : '', people: [] };
       const n = 3 + Math.floor(rnd() * 3);
       for (let i = 0; i < n; i++) {
-        const a = (rnd() - 0.5) * 7, b = 6.6 + rnd() * 2.6;
+        const a = (rnd() - 0.5) * 8, b = 7.3 + rnd() * 2.6;
         st.people.push({ p: [p[0] + t[0] * a + r[0] * b, p[1] + t[1] * a + r[1] * b], coat: COATS[Math.floor(rnd() * COATS.length)], hat: rnd() < 0.7, board: rnd() < 0.75, gone: false, ph: rnd() * 6 });
       }
       return st;
@@ -351,7 +351,9 @@
     }
 
     function personFeats(F, p, coat, hat, out, bob) {
-      out.push(ext(disc(F, p, 0.24, 8), 0.02, 1.36 + bob, coat));
+      for (const k of [-0.1, 0.1]) out.push(ext(disc(F, [p[0] + k, p[1]], 0.075, 6), 0.02, 0.8, '#262B33'));
+      out.push(ext(disc(F, p, 0.25, 9), 0.78, 1.36 + bob, coat));
+      out.push(ext(disc(F, p, 0.11, 6), 1.33 + bob, 1.42 + bob, '#3A3F48'));
       out.push(ext(disc(F, p, 0.13, 8), 1.42 + bob, 1.68 + bob, '#E2BE9C'));
       if (hat) out.push(ext(disc(F, p, 0.15, 8), 1.62 + bob, 1.8 + bob, '#2B2F38'));
     }
@@ -362,12 +364,17 @@
       const front = [pl.p[0] + f[0] * (car.len / 2 - 0.05), pl.p[1] + f[1] * (car.len / 2 - 0.05)];
       out.push(ext(rect(F, front, pl.h, 0.1, car.wid * 0.9), 0.55, 0.75, night() ? '#FFF6D8' : '#DDE3EA'));
     }
-    function busFeats(F, pos, h, out) {
-      out.push(ext(rect(F, pos, h, 12, 2.55), 0.35, 1.15, '#1C6FB8'));
-      out.push(ext(rect(F, pos, h, 12, 2.55), 1.15, 2.5, '#1D2833'));
-      out.push(ext(rect(F, pos, h, 12, 2.55), 2.5, 3.05, '#F2F5F8'));
-      const f = [Math.sin(h * RAD), Math.cos(h * RAD)];
-      out.push(ext(rect(F, [pos[0] + f[0] * 6.02, pos[1] + f[1] * 6.02], h, 0.06, 1.9), 2.6, 2.95, '#FFB000'));
+    function busFeats(F, pos, h, out, open) {
+      const f = [Math.sin(h * RAD), Math.cos(h * RAD)], r = [f[1], -f[0]];
+      const at = (u, v) => [pos[0] + f[0] * u + r[0] * v, pos[1] + f[1] * u + r[1] * v];
+      for (const u of [-3.6, 3.6]) for (const v of [-1.05, 1.05]) out.push(ext(disc(F, at(u, v), 0.5, 10), 0.0, 0.42, '#15181D'));
+      out.push(ext(rect(F, pos, h, 12, 2.55), 0.32, 1.05, '#1C6FB8'));
+      out.push(ext(rect(F, pos, h, 12, 2.55), 1.05, 2.45, '#22303D'));
+      out.push(ext(rect(F, pos, h, 12, 2.55), 2.45, 3.05, '#F2F5F8'));
+      for (let u = -4.6; u <= 4.6; u += 1.9) out.push(ext(rect(F, at(u, 0), h, 0.12, 2.6), 1.05, 2.45, '#1C6FB8'));
+      for (const u of [3.9, -0.9]) out.push(ext(rect(F, at(u, 1.25 + (open ? 0.05 : 0)), h, 1.25, 0.08), 0.34, 2.4, open ? '#0E1318' : '#9DB3C6'));
+      out.push(ext(rect(F, at(6.02, 0), h, 0.06, 1.9), 2.55, 2.95, '#FFB000'));
+      for (const v of [-0.85, 0.85]) out.push(ext(rect(F, at(6.03, v), h, 0.06, 0.32), 0.7, 0.92, '#FFF6D8'));
     }
 
     function plan(route) {
@@ -679,12 +686,17 @@
         setHud(T('n_board'), st.name, 'bus');
         if (bus.boardT > 3.2) { bus.state = 'go'; return true; }
       }
-      let hd;
-      if (bus.state === 'board') { const d = ph.path.pos(170 + 3); hd = headingOf(unit(d[0] - st.spot[0], d[1] - st.spot[1])); }
-      else if (bus.state === 'wait') hd = st.h - 120 + Math.sin(t * 0.8) * 8;
+      let hd, W = st.spot;
+      if (bus.state === 'board') {
+        const dp = ph.path.pos(172.5), r = st.r, door = [dp[0] + r[0] * 6.0, dp[1] + r[1] * 6.0];
+        const k = Math.min(1, bus.boardT / 2.6);
+        W = [st.spot[0] + (door[0] - st.spot[0]) * k, st.spot[1] + (door[1] - st.spot[1]) * k];
+        const look = [dp[0] + r[0] * 4.6, dp[1] + r[1] * 4.6];
+        hd = k < 0.98 ? headingOf(unit(look[0] - W[0], look[1] - W[1])) : run.hd;
+      } else if (bus.state === 'wait') hd = st.h + 14 + Math.sin(t * 0.7) * 10 - (t > 1.6 ? 150 * Math.min(1, (t - 1.6) / 1.2) : 0);
       else { const bp = ph.path.pos(bus.s - 6); hd = headingOf(unit(bp[0] - st.spot[0], bp[1] - st.spot[1])); }
       run.hd = run.hd == null ? hd : run.hd + angDiff(run.hd, hd) * Math.min(1, dtW * 2);
-      run.cam = { W: st.spot, hd: run.hd, A: 2.2, th: 79, back: 0.4 };
+      run.cam = { W, hd: run.hd, A: 2.2, th: 79, back: 0.4 };
       return false;
     }
 
@@ -749,7 +761,7 @@
       const cur = run.plan.phases[run.i];
       if (bus.on && bus.path && cur && bus.state !== 'wait' && (cur.type === 'stop' || cur.type === 'alight' || (cur.type === 'walk' && bus.state === 'leave' && bus.s < bus.path.len + 5))) {
         const path = bus.path, t = path.tangent(bus.s - 6, 6), r = [t[1], -t[0]], p = path.pos(bus.s - 6);
-        busFeats(F, [p[0] + r[0] * 3.6, p[1] + r[1] * 3.6], headingOf(t), out);
+        busFeats(F, [p[0] + r[0] * 3.6, p[1] + r[1] * 3.6], headingOf(t), out, bus.state === 'board' || (cur.type === 'alight' && (run.alT || 0) < 1.2));
       }
       setData('n-dyn', out);
     }
