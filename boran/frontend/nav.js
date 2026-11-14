@@ -442,7 +442,7 @@
         const path = core.slice(0, core.len, 170, 170);
         const rsegs = (tr.nav && tr.nav.ride_segs) || [], rk = core.len / Math.max(1, (tr.nav && tr.nav.ride_len) || core.len);
         const halfAt = (sp) => { const d = (clamp(sp, 170, 170 + core.len) - 170) / rk; let hw = rsegs.length ? rsegs[0][1] : 'residential'; for (const sg of rsegs) { if (sg[0] <= d) hw = sg[1]; else break; } return HALF[hw] || 3.75; };
-        const laneAt = (sp) => { let a = 0; for (const k of [-24, -12, 0, 12, 24]) { const h = halfAt(sp + k); a += Math.max(1.9, h - 1.9); } return a / 5; };
+        const laneAt = (sp) => { let a = 0; for (const k of [-24, -12, 0, 12, 24]) { const h = halfAt(sp + k); a += Math.min(3.6, Math.max(1.9, h - 1.9)); } return a / 5; };
         path.lane = laneAt;
         const stA = stopScene(F, path.slice(170, path.len - 170), false, tr.stops[0], rnd, laneAt(170));
         const stB = stopScene(F, path.slice(170, path.len - 170), true, tr.stops[1], rnd, laneAt(path.len - 170));
