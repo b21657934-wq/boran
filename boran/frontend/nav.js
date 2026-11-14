@@ -880,7 +880,7 @@
       });
       const bus = run.bus;
       const cur = run.plan.phases[run.i];
-      if (bus.on && bus.path && cur && bus.state !== 'wait' && (cur.type === 'stop' || cur.type === 'alight' || (cur.type === 'walk' && bus.state === 'leave' && bus.s < bus.path.len + 5))) {
+      if (bus.on && bus.path && cur && bus.state !== 'wait' && (cur.type === 'stop' || cur.type === 'alight' || (cur.type === 'ride' && run.view !== 'fp') || (cur.type === 'walk' && bus.state === 'leave' && bus.s < bus.path.len + 5))) {
         const path = bus.path, t = path.tangent(bus.s - 6, 6), r = [t[1], -t[0]], p = path.pos(bus.s - 6);
         const lo = path.lane ? path.lane(bus.s - 6) : 3.6;
         busFeats(F, [p[0] + r[0] * lo, p[1] + r[1] * lo], headingOf(t), out, bus.state === 'board' || (cur.type === 'alight' && (run.alT || 0) < 1.2));
