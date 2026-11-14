@@ -295,12 +295,6 @@
 
     function staticForCrossing(F, X) {
       const out = [], snow = night() ? '#3A475C' : '#FFFFFF', pole = night() ? '#5A6577' : '#3E4752', h = headingOf(X.u);
-      for (const sgn of [1, -1]) for (const side of [1, -1]) {
-        const s0 = side * 4.5, s1 = side * 110, mid = (s0 + s1) / 2, len = Math.abs(s1 - s0);
-        const off = sgn * (X.half + 0.55);
-        const c = [X.Zr[0] + X.u[0] * mid + X.nL[0] * off, X.Zr[1] + X.u[1] * mid + X.nL[1] * off];
-        out.push(ext(rect(F, c, h, len, 1.0), 0, 0.55 + 0.1 * ((side + sgn + 2) % 3), snow));
-      }
       if (X.sig) {
         X.heads = [];
         for (const sgn of [1, -1]) {
