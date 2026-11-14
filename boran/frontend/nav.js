@@ -584,7 +584,7 @@
         const X = ph.crossings.find((c) => c.sIn - run.s < 75 && run.s - c.sOut < 25);
         if (X) { z = 19.25; pitch = 62; ahead = 16; }
       } else if (ph && (ph.type === 'stop' || ph.type === 'alight')) { z = 19.3; pitch = 60; ahead = 12; }
-      else if (ph && ph.type === 'ride') { z = 17.5; pitch = 56; ahead = 110; }
+      else if (ph && ph.type === 'ride') { z = 17.6; pitch = 58; ahead = 30; }
       const H = map.getCanvas().clientHeight || 800;
       if (H < 640) z -= 0.35;
       const k = run.camInit ? Math.min(1, (run.dtR || 0.03) * 1.6) : 1;

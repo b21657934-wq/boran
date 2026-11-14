@@ -41,8 +41,8 @@ def _with_flow(ed, u):
     return not ow or (ow == 1 and ed["u"] == u) or (ow == -1 and ed["v"] == u)
 
 
-def _stop_side(city, line, stop, at_end):
-    pts = [city.proj.xy(p[0], p[1]) for p in (line[::-1] if at_end else line)]
+def _stop_side(proj, line, stop, at_end):
+    pts = [proj.xy(p[0], p[1]) for p in (line[::-1] if at_end else line)]
     if len(pts) < 2:
         return 0.0
     x0, y0 = pts[0]
@@ -55,9 +55,216 @@ def _stop_side(city, line, stop, at_end):
     dx, dy = far[0] - x0, far[1] - y0
     if at_end:
         dx, dy = -dx, -dy
-    sx, sy = city.proj.xy(stop["lon"], stop["lat"])
+    sx, sy = proj.xy(stop["lon"], stop["lat"])
     d = math.hypot(dx, dy) or 1.0
     return ((sx - x0) * dy - (sy - y0) * dx) / d
+
+
+def _fit_ride(proj, line, segs, A, B, reach=40.0):
+    pts = [proj.xy(p[0], p[1]) for p in line]
+    if len(pts) < 2:
+        return None
+    cum = [0.0]
+    for i in range(1, len(pts)):
+        cum.append(cum[-1] + math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]))
+    total = cum[-1]
+
+    def passes(stop, lo, hi):
+        sx, sy = proj.xy(stop["lon"], stop["lat"])
+        best = None
+        for i in range(len(pts) - 1):
+            if cum[i + 1] < lo or cum[i] > hi:
+                continue
+            (x1, y1), (x2, y2) = pts[i], pts[i + 1]
+            dx, dy = x2 - x1, y2 - y1
+            L = math.hypot(dx, dy)
+            if L < 1e-6:
+                continue
+            t = ((sx - x1) * dx + (sy - y1) * dy) / L
+            u = max(0.0, min(1.0, t / L))
+            s = cum[i] + u * L
+            side = ((sx - x1) * dy - (sy - y1) * dx) / L
+            if s < lo or s > hi or abs(t - u * L) > 6.0 or side < -1.5 or side > reach:
+                continue
+            if best is None or abs(side) < best[0]:
+                best = (abs(side), s, i, u)
+        return best
+
+    st = passes(A, 0.0, total * 0.6)
+    if st is None:
+        return None
+    en = passes(B, max(st[1] + 50.0, total * 0.4), total)
+    if en is None:
+        return None
+    _, s0, i0, u0 = st
+    _, s1, i1, u1 = en
+
+    def at(i, u):
+        a, b = line[i], line[i + 1]
+        return [round(a[0] + (b[0] - a[0]) * u, 7), round(a[1] + (b[1] - a[1]) * u, 7)]
+
+    new = []
+    for q in [at(i0, u0)] + [list(p) for p in line[i0 + 1:i1 + 1]] + [at(i1, u1)]:
+        if not new or abs(q[0] - new[-1][0]) + abs(q[1] - new[-1][1]) > 1e-7:
+            new.append(q)
+    k = 0
+    for j, sg in enumerate(segs):
+        if sg[0] <= s0 + 1e-6:
+            k = j
+    out = []
+    for j in range(k, len(segs)):
+        if segs[j][0] >= s1:
+            break
+        out.append([round(max(0.0, segs[j][0] - s0), 1)] + list(segs[j][1:]))
+    return new, out, s1 - s0
+
+
+def _stop_edges(city, stop, reach=30.0, k=3):
+    sx, sy = city.proj.xy(stop["lon"], stop["lat"])
+    seen, out = set(), []
+    for _, n in city.ngrid.near(sx, sy, 260.0):
+        for _, ei in city.adj[n]:
+            if ei in seen:
+                continue
+            seen.add(ei)
+            ed = city.edges[ei]
+            if ed["hw"] not in ROADS and ed["hw"] != "service":
+                continue
+            pts = [city.proj.xy(p[0], p[1]) for p in ed["p"]]
+            best = None
+            for i in range(len(pts) - 1):
+                (x1, y1), (x2, y2) = pts[i], pts[i + 1]
+                dx, dy = x2 - x1, y2 - y1
+                L = math.hypot(dx, dy)
+                if L < 1e-6:
+                    continue
+                t = ((sx - x1) * dx + (sy - y1) * dy) / L
+                side = ((sx - x1) * dy - (sy - y1) * dx) / L
+                if -3.0 <= t <= L + 3.0 and (best is None or abs(side) < abs(best[0])):
+                    best = (side, i, max(0.0, min(1.0, t / L)))
+            if best is None or abs(best[0]) > reach:
+                continue
+            side, i, u = best
+            ow = ed.get("ow", 0)
+            pen = abs(side) + (0.0 if ed["hw"] in BIG_ROADS else 6.0) + (15.0 if ed["hw"] == "service" else 0.0)
+            for rev in (False, True):
+                if ow == (1 if rev else -1):
+                    continue
+                if abs(side) >= 2.0 and (side > 0) == rev:
+                    continue
+                out.append((pen, ei, rev, i, u))
+    out.sort(key=lambda c: c[0])
+    return out[:k]
+
+
+def _part(city, ei, rev, i, u, head):
+    ed = city.edges[ei]
+    p = ed["p"]
+    a, b = p[i], p[i + 1]
+    at = [round(a[0] + (b[0] - a[0]) * u, 7), round(a[1] + (b[1] - a[1]) * u, 7)]
+    if head:
+        pts = [at] + ([list(q) for q in p[i::-1]] if rev else [list(q) for q in p[i + 1:]])
+        node = ed["u"] if rev else ed["v"]
+    else:
+        pts = ([list(q) for q in p[:i:-1]] if rev else [list(q) for q in p[:i + 1]]) + [at]
+        node = ed["v"] if rev else ed["u"]
+    xy = [city.proj.xy(q[0], q[1]) for q in pts]
+    length = sum(math.hypot(xy[j][0] - xy[j - 1][0], xy[j][1] - xy[j - 1][1]) for j in range(1, len(xy)))
+    return pts, node, length, [ed["hw"], nav._name(city, ed), 1 if ed.get("ow") else 0]
+
+
+def _uturns(proj, line, span=80.0):
+    pts = [proj.xy(p[0], p[1]) for p in line]
+    hs, acc = [], 0.0
+    for i in range(len(pts) - 1):
+        L = math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1])
+        if L > 3.0:
+            hs.append((acc, math.atan2(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1])))
+        acc += L
+    n, j = 0, 0
+    while j < len(hs):
+        hit = None
+        for k in range(j + 1, len(hs)):
+            if hs[k][0] - hs[j][0] > span:
+                break
+            if abs((math.degrees(hs[k][1] - hs[j][1]) + 180.0) % 360.0 - 180.0) > 150.0:
+                hit = k
+                break
+        if hit is None:
+            j += 1
+        else:
+            n += 1
+            j = hit
+    return n
+
+
+KERB = {"footway", "path", "pedestrian", "cycleway", "steps"}
+
+
+def _kerb_node(city, line, stop, at_end, fallback, r=60.0):
+    pts = [city.proj.xy(p[0], p[1]) for p in (line[::-1] if at_end else line)]
+    if len(pts) < 2:
+        return fallback
+    x0, y0 = pts[0]
+    far = next((q for q in pts[1:] if math.hypot(q[0] - x0, q[1] - y0) > 8.0), pts[-1])
+    dx, dy = far[0] - x0, far[1] - y0
+    if at_end:
+        dx, dy = -dx, -dy
+    L = math.hypot(dx, dy) or 1.0
+    rx, ry = dy / L, -dx / L
+    sx, sy = city.proj.xy(stop["lon"], stop["lat"])
+    best = None
+    for d, n in city.ngrid.near(sx, sy, r):
+        if not any(city.edges[ei]["hw"] in KERB for _, ei in city.adj[n]):
+            continue
+        nx, ny = city.proj.xy(*city.nodes[n])
+        if (nx - x0) * rx + (ny - y0) * ry < 3.0:
+            continue
+        if best is None or d < best[0]:
+            best = (d, n)
+    return best[1] if best else fallback
+
+
+def _bus_ride(city, an, A, B):
+    best, memo = None, {}
+    for ca in _stop_edges(city, A):
+        pa, na, la, ia = _part(city, ca[1], ca[2], ca[3], ca[4], True)
+        for cb in _stop_edges(city, B):
+            if cb[1] == ca[1]:
+                continue
+            pb, nb, lb, ib = _part(city, cb[1], cb[2], cb[3], cb[4], False)
+            if na == nb:
+                mid, mlen, msegs, svc = [], 0.0, [], 0.0
+            else:
+                if (na, nb) not in memo:
+                    res = None
+                    for allowed in (lambda ed: ed["hw"] in ROADS, lambda ed: ed["hw"] in ROADS or ed["hw"] == "service"):
+                        res = astar.search(city, na, nb, an["risks"], an["wind_k"], safe=False, allow=allowed, weight=lambda ed: ROAD_W.get(ed["hw"], 3.0), allow_dir=_with_flow)
+                        if res is not None:
+                            break
+                    if res is None:
+                        memo[(na, nb)] = None
+                    else:
+                        d = astar.describe(city, res, an["risks"], an["wind_k"])
+                        memo[(na, nb)] = (d["line"], d["length"], nav.leg(city, res)["segs"],
+                                          sum(city.edges[ei]["len"] for ei in res["edges"] if city.edges[ei]["hw"] == "service"))
+                if memo[(na, nb)] is None:
+                    continue
+                mid, mlen, msegs, svc = memo[(na, nb)]
+            svc += (la if ia[0] == "service" else 0.0) + (lb if ib[0] == "service" else 0.0)
+            total = la + mlen + lb
+            line = []
+            for q in pa + mid + pb:
+                if not line or abs(q[0] - line[-1][0]) + abs(q[1] - line[-1][1]) > 1e-7:
+                    line.append(list(q))
+            if len(line) < 2 or _stop_side(city.proj, line, A, False) < -1.5 or _stop_side(city.proj, line, B, True) < -1.5:
+                continue
+            score = total + 4.0 * svc + 900.0 * _uturns(city.proj, line)
+            if best is not None and score >= best[0]:
+                continue
+            segs = [[0.0] + ia] + [[round(la + sg[0], 1)] + list(sg[1:]) for sg in msegs] + [[round(la + mlen, 1)] + ib]
+            best = (score, line, total, segs)
+    return best
 
 
 def _bus_path(city, an, a, b):
@@ -118,21 +325,42 @@ def route(city, an, weather, src, dst):
                     continue
                 cands.append((ra["cost"] + rb["cost"], sa, sb, ra, da, rb, db, na, nb))
         cands.sort(key=lambda c: c[0])
-        best = None
-        for cand in cands[:8]:
+        best, fitted = None, None
+        for cand in cands[:6]:
             _, sa, sb, ra, da, rb, db, na, nb = cand
             A0, B0 = city.stops[sa], city.stops[sb]
+            ride = _bus_ride(city, an, A0, B0)
+            if ride:
+                score = da["minutes"] + db["minutes"] + ride[0] / config.TRANSIT_SPEED / 60.0
+                if fitted is None or score < fitted[0]:
+                    fitted = (score, cand + ride[1:])
+                continue
+            if fitted is not None:
+                continue
             line, m, sg = _bus_path(city, an, _road_node(city, A0["lon"], A0["lat"], na), _road_node(city, B0["lon"], B0["lat"], nb))
             if line is None:
                 continue
-            if _stop_side(city, line, A0, False) <= 1.5 and _stop_side(city, line, B0, True) <= 1.5:
+            fit = _fit_ride(city.proj, line, sg, A0, B0)
+            if fit:
+                line, sg, m = fit
                 best = cand + (line, m, sg)
                 break
             if best is None:
                 best = cand + (line, m, sg)
+        if fitted is not None:
+            best = fitted[1]
         if best:
             _, sa, sb, ra, da, rb, db, na, nb, ride_line, ride_m, ride_segs = best
             A, B = city.stops[sa], city.stops[sb]
+            ka, kb = _kerb_node(city, ride_line, A, False, na), _kerb_node(city, ride_line, B, True, nb)
+            if ka != na:
+                r2, d2 = _leg(city, a, ka, an, True)
+                if d2 is not None:
+                    ra, da, na = r2, d2, ka
+            if kb != nb:
+                r2, d2 = _leg(city, kb, b, an, True)
+                if d2 is not None:
+                    rb, db, nb = r2, d2, kb
 
             def named(stop, near):
                 if stop.get("name"):
@@ -162,7 +390,7 @@ def route(city, an, weather, src, dst):
                 "wave": _wave(city, ra) + _wave(city, rb),
                 "nav": {"legs": [nav.leg(city, ra), nav.leg(city, rb)], "ride_stops": nav.ride_stops(city, ride_line, A, B),
                         "ride_segs": [[sg[0], sg[1], sg[3] if len(sg) > 3 else 0] for sg in ride_segs], "ride_len": round(ride_m or 0, 1),
-                        "side": [round(_stop_side(city, ride_line, A, False), 1), round(_stop_side(city, ride_line, B, True), 1)]},
+                        "side": [round(_stop_side(city.proj, ride_line, A, False), 1), round(_stop_side(city.proj, ride_line, B, True), 1)]},
                 "expanded": da["expanded"] + db["expanded"],
             }
     out["mode"] = "transit" if transit else "walk"

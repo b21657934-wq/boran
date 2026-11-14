@@ -147,3 +147,24 @@ def test_pedestrian_area_gets_shortcuts():
     diag = [e for e in data["edges"] if e["hw"] == "pedestrian" and len(e["p"]) == 2 and {tuple(e["p"][0]), tuple(e["p"][1])} == {(round(lon0, 5), round(lat0, 5)), (round(lon0 + d * 1.6, 5), round(lat0 + d, 5))}]
     assert diag, "plaza should be crossable diagonally"
     assert any(e["hw"] == "service" for e in data["edges"])
+
+
+def test_ride_starts_where_bus_passes_stop_on_its_right():
+    from boran.geo import Projector
+    pr = Projector(51.1, 71.4)
+    ll = lambda x, y: [71.4 + x / pr.kx, 51.1 + y / pr.ky]
+    xy = [(60, -20), (60, 120), (8, 120), (8, -300)]
+    line = [ll(x, y) for x, y in xy]
+    segs = [[0.0, "tertiary", "", 1], [140.0, "residential", "", 0], [192.0, "tertiary", "", 1]]
+    A = {"lon": ll(0, 0)[0], "lat": ll(0, 0)[1]}
+    B = {"lon": ll(0, -290)[0], "lat": ll(0, -290)[1]}
+    out = pipeline._fit_ride(pr, line, segs, A, B)
+    assert out is not None
+    new, nsegs, length = out
+    sx, sy = pr.xy(*new[0])
+    ex, ey = pr.xy(*new[-1])
+    assert abs(sx - 8) < 0.5 and abs(sy) < 0.5
+    assert abs(ex - 8) < 0.5 and abs(ey + 290) < 0.5
+    assert abs(length - 290) < 1
+    assert nsegs[0][0] == 0 and nsegs[0][1] == "tertiary" and len(nsegs) == 1
+    assert pipeline._stop_side(pr, new, A, False) > 0 and pipeline._stop_side(pr, new, B, True) > 0
