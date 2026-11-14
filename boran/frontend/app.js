@@ -11,14 +11,16 @@
   const LANGS = ['ru', 'kk', 'en'];
 
   const S = {
-    args: null, city: null, cityVersion: null, lang: store.get('boran.lang', 'ru'), themeForce: null,
+    args: null, city: null, cityVersion: null, lang: store.get('boran.lang', 'ru'), themeForce: store.get('boran.theme', null),
     src: null, dst: null, picking: null, markMode: false, n: 0, pendingRoute: false,
     routeKey: null, routeT0: 0, waveT0: 0, view: null, riskTable: null, tiles: new Map(), tileReq: new Map(), tileShown: '',
     marks: store.get('boran.marks', []), splashDone: false, introDone: false, t0: performance.now(),
   };
   const t = (k, vars) => { let s = (window.I18N[S.lang] || window.I18N.ru)[k]; if (s == null) s = window.I18N.ru[k] ?? k; if (vars) for (const a in vars) s = s.split('{' + a + '}').join(vars[a]); return s; };
   const num = (v, d = 0) => Number(v).toFixed(d).replace('-', '−');
-  const isNight = () => S.themeForce === 'night';
+  const THEMES = ['city', 'game', 'night'];
+  const theme = () => (THEMES.includes(S.themeForce) ? S.themeForce : (new Date().getHours() >= 18 || new Date().getHours() < 7 ? 'night' : 'city'));
+  const isNight = () => theme() === 'night';
 
   function post(type, extra) { window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, extra), '*'); }
   function send() {
@@ -57,8 +59,7 @@
       await initMap();
     }
     if (String(S.riskTable) !== String(args.riskTable)) { S.riskTable = args.riskTable; pushRisk(); }
-    document.body.classList.toggle('night', isNight());
-    document.body.classList.toggle('day', !isNight());
+    themeBody();
     renderAll();
     const key = args.route ? JSON.stringify([args.route.src, args.route.dst, args.scenario]) : null;
     if (key !== S.routeKey) {
@@ -91,31 +92,49 @@
   let map = null, baseStyle = null, styleKey = null;
   const markers = { src: null, dst: null, places: [] };
   const FC = (features) => ({ type: 'FeatureCollection', features: features || [] });
+  const SKY = (sky, hor, fog, ab) => ({ 'sky-color': sky, 'horizon-color': hor, 'fog-color': fog, 'fog-ground-blend': 0.45, 'horizon-fog-blend': 0.7, 'sky-horizon-blend': 0.65, 'atmosphere-blend': ab });
   const PAL = {
-    day: {
-      bg: '#F1F4F7', res: '#E9EEF2', block: '#E5EAEF', park: '#E7EDF2', tree: '#BCC9D6', wood: '#DDE5EC', woodTree: '#AEBFCF', pitch: '#E7EDF2',
-      water: '#CBDDEA', iceCrack: '#A6C2D6', iceShine: '#EAF3F9', waterLine: '#B6CEDF',
-      road: '#A9B3BE', sec: '#808C9A', major: '#5A6573', casing: '#F1F4F7', majorCasing: '#F1F4F7', path: '#C8D0D8', rail: '#B0BAC5',
-      bld2d: '#E0E6EC', bldOutline: '#CCD5DE', bld3d: '#F5F8FA', bldTall: '#D2DDE8', text: '#1F2A37', poiText: '#5B6878', waterText: '#45708E', halo: '#F1F4F7',
-      risk: ['#9AA7B6', '#F2A93B', '#E0344C'], ok: '#1FA971', heat: ['rgba(242,169,59,0.24)', 'rgba(238,120,48,0.4)', 'rgba(224,52,76,0.56)'],
-      route: '#0B7A92', routeCasing: '#FFFFFF', routeGlow: '#14A5C2', short: '#5E6B85', ride: '#6C4CE0', wave: '#0B7A92', warm: '#E8743B', worst: '#E0344C',
-      light: { anchor: 'viewport', color: '#FFFFFF', intensity: 0.3, position: [1.3, 200, 35] },
-      sky: { 'sky-color': '#BCD1E5', 'horizon-color': '#EEF3F7', 'fog-color': '#E7EDF3', 'fog-ground-blend': 0.5, 'horizon-fog-blend': 0.7, 'sky-horizon-blend': 0.6, 'atmosphere-blend': 0.4 },
+    city: {
+      bg: '#F2EFE9', res: '#EDE8DF', block: '#ECE7DE', park: '#CFE6C2', tree: '#B5D6A4', wood: '#C3DFB4', woodTree: '#A6CC93', pitch: '#D4EBC8',
+      water: '#A9D5F2', iceCrack: '#8DC2E6', iceShine: '#D7ECFA', waterLine: '#A9D5F2',
+      road: '#FFFFFF', sec: '#FFF1B8', major: '#FFD45C', casing: '#D9D2C5', majorCasing: '#E0B23C', path: '#E6DFD2', rail: '#C9C2B6',
+      bld2d: '#E4DCCF', bldOutline: '#D3C9B8', bld3d: ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#EFE8DC', 25, '#E3D8C6', 46, '#DCD2C2'],
+      bldTall: ['match', ['%', ['round', ['coalesce', ['get', 'render_height'], 60]], 3], 0, '#BFD3E8', 1, '#C9D9EA', '#B3C9E0'],
+      text: '#33383F', poiText: '#6A6F78', waterText: '#3B78A8', halo: '#FFFFFF',
+      risk: ['#9AA6B5', '#FF8A00', '#E0244A'], ok: '#1FA971', heat: ['rgba(255,138,0,0.22)', 'rgba(240,100,30,0.36)', 'rgba(224,36,74,0.52)'],
+      route: '#0B7A92', routeCasing: '#FFFFFF', routeGlow: '#14A5C2', short: '#5E6B85', ride: '#6C4CE0', wave: '#0B7A92', warm: '#E8743B', worst: '#E0244A',
+      light: { anchor: 'viewport', color: '#FFFFFF', intensity: 0.34, position: [1.3, 210, 40] },
+      sky: SKY('#9FCBF0', '#F2EFE9', '#F2EFE9', 0.4),
+    },
+    game: {
+      bg: '#E9F4FB', res: '#E3F0F9', block: '#E1EEF7', park: '#A8E6BE', tree: '#7FD39E', wood: '#96DDB0', woodTree: '#66C78C', pitch: '#B6ECC8',
+      water: '#5EC7F2', iceCrack: '#47B3E2', iceShine: '#9EE0FA', waterLine: '#5EC7F2',
+      road: '#FFFFFF', sec: '#FFE08A', major: '#FFB347', casing: '#C9D6E6', majorCasing: '#E8893A', path: '#D5E3EE', rail: '#B9C8D8',
+      bld2d: '#F7E7DA', bldOutline: '#EAD3C2',
+      bld3d: ['match', ['%', ['round', ['*', ['coalesce', ['get', 'render_height'], 6], 3.7]], 6], 0, '#FFB4A2', 1, '#FFD6A5', 2, '#A0C4FF', 3, '#BDB2FF', 4, '#9BF6FF', '#FDFFB6'],
+      bldTall: ['match', ['%', ['round', ['coalesce', ['get', 'render_height'], 60]], 3], 0, '#7AA6FF', 1, '#9D8CFF', '#5ED1E8'],
+      text: '#26324A', poiText: '#4A5A78', waterText: '#1D6FA5', halo: '#FFFFFF',
+      risk: ['#8796AE', '#FF6A00', '#E8264F'], ok: '#12B76A', heat: ['rgba(255,106,0,0.22)', 'rgba(255,80,40,0.36)', 'rgba(232,38,79,0.52)'],
+      route: '#3355FF', routeCasing: '#FFFFFF', routeGlow: '#5C7CFF', short: '#55617A', ride: '#C2259E', wave: '#3355FF', warm: '#FF7A2E', worst: '#E8264F',
+      light: { anchor: 'viewport', color: '#FFFFFF', intensity: 0.42, position: [1.3, 210, 40] },
+      sky: SKY('#7CC4F5', '#E9F4FB', '#E9F4FB', 0.4),
     },
     night: {
-      bg: '#0B1220', res: '#0E1626', block: '#0F1828', park: '#111C2D', tree: '#1F2E45', wood: '#121F31', woodTree: '#24364F', pitch: '#111C2D',
-      water: '#122A43', iceCrack: '#24476A', iceShine: '#1A3856', waterLine: '#1D3B5B',
-      road: '#283550', sec: '#34445F', major: '#4A5D7E', casing: '#0B1220', majorCasing: '#0B1220', path: '#1E2A42', rail: '#2A3550',
-      bld2d: '#141C2B', bldOutline: '#1E2839', bld3d: '#1A2231', bldTall: '#25334A', text: '#DCE6F5', poiText: '#8A9AB8', waterText: '#6E9CC8', halo: '#0B1220',
-      risk: ['#4A5A76', '#FFB547', '#FF4D6A'], ok: '#4BE3A0', heat: ['rgba(255,181,71,0.22)', 'rgba(255,128,64,0.4)', 'rgba(255,77,106,0.58)'],
-      route: '#7FE7F5', routeCasing: '#0B1220', routeGlow: '#2CC5E0', short: '#8F9BB5', ride: '#B9A6FF', wave: '#7FE7F5', warm: '#FFB46B', worst: '#FF4D6A',
-      light: { anchor: 'viewport', color: '#C9D5F0', intensity: 0.3, position: [1.2, 210, 35] },
-      sky: { 'sky-color': '#04070E', 'horizon-color': '#16233C', 'fog-color': '#0D1627', 'fog-ground-blend': 0.6, 'horizon-fog-blend': 0.8, 'sky-horizon-blend': 0.7, 'atmosphere-blend': 0.4 },
+      bg: '#070C18', res: '#0A1121', block: '#0A1222', park: '#0B1E24', tree: '#15323A', wood: '#0C2228', woodTree: '#183A42', pitch: '#0C2026',
+      water: '#0B2C4D', iceCrack: '#1A4A75', iceShine: '#133B62', waterLine: '#0E3558',
+      road: '#2A3550', sec: '#C98A3A', major: '#FF9F43', casing: '#070C18', majorCasing: '#3A2210', path: '#1A2338', rail: '#25304A',
+      bld2d: '#121A2E', bldOutline: '#1B2540', bld3d: ['interpolate', ['linear'], ['coalesce', ['get', 'render_height'], 8], 0, '#151E36', 30, '#1D2A4E', 46, '#22305A'],
+      bldTall: ['match', ['%', ['round', ['coalesce', ['get', 'render_height'], 60]], 3], 0, '#3B4FA8', 1, '#5B3FA8', '#2F6FB0'],
+      text: '#DCE6FF', poiText: '#8E9CC0', waterText: '#6EA8DC', halo: '#070C18',
+      risk: ['#4A5A7A', '#FFB547', '#FF4D6A'], ok: '#4BE3A0', heat: ['rgba(255,181,71,0.22)', 'rgba(255,128,64,0.4)', 'rgba(255,77,106,0.58)'],
+      route: '#7FE7F5', routeCasing: '#070C18', routeGlow: '#2CC5E0', short: '#8F9BB5', ride: '#C9B6FF', wave: '#7FE7F5', warm: '#FFB46B', worst: '#FF4D6A',
+      light: { anchor: 'viewport', color: '#B9A6FF', intensity: 0.45, position: [1.2, 200, 30] },
+      sky: SKY('#05070F', '#24205A', '#0C1024', 0.6),
     },
   };
-  const pal = () => PAL[isNight() ? 'night' : 'day'];
+  const pal = () => PAL[theme()];
   function patternImage(kind, night) {
-    const P = PAL[night ? 'night' : 'day'], n = 128, c = document.createElement('canvas');
+    const P = PAL[night] || PAL.city, n = 128, c = document.createElement('canvas');
     c.width = c.height = n;
     const g = c.getContext('2d');
     let seed = kind === 'ice' ? 11 : kind === 'wood' ? 29 : 17;
@@ -173,9 +192,10 @@
     }
     return out;
   }
-  function restyle(base, night, lang) {
+  function restyle(base, th, lang) {
+    const night = th === 'night';
     const st = JSON.parse(JSON.stringify(base));
-    const P = PAL[night ? 'night' : 'day'];
+    const P = PAL[th];
     const nameKey = lang === 'kk' ? 'name:kk' : lang === 'en' ? 'name:en' : 'name:ru';
     const out = [];
     for (const L of st.layers) {
@@ -186,7 +206,6 @@
       if (L.type === 'background') p['background-color'] = P.bg;
       else if (L.type === 'fill') {
         delete p['fill-pattern'];
-        const th = night ? 'night' : 'day';
         if (id === 'water') { p['fill-color'] = P.water; p['fill-pattern'] = 'b-ice-' + th; }
         else if (id === 'park' || id === 'landcover_grass') { p['fill-color'] = P.park; p['fill-opacity'] = 1; p['fill-pattern'] = 'b-park-' + th; }
         else if (id === 'landcover_wood') { p['fill-color'] = P.wood; p['fill-opacity'] = 1; p['fill-pattern'] = 'b-wood-' + th; }
@@ -250,8 +269,8 @@
     return st;
   }
 
-  function flatStyle(night) {
-    const P = PAL[night ? 'night' : 'day'];
+  function flatStyle(th) {
+    const P = PAL[th] || PAL.city;
     return { version: 8, glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf', sources: {}, layers: [{ id: 'background', type: 'background', paint: { 'background-color': P.bg } }], light: P.light, sky: P.sky };
   }
 
@@ -376,7 +395,7 @@
       paint: { 'text-color': isNight() ? P.bg : '#FFFFFF', 'text-opacity': 0 } };
   }
   function addOverlay(st) {
-    const P = PAL[isNight() ? 'night' : 'day'];
+    const P = PAL[theme()];
     const firstBld = st.layers.findIndex((L) => L.id === 'building' || L.type === 'fill-extrusion');
     const firstSym = st.layers.findIndex((L) => L.type === 'symbol');
     let before = firstBld < 0 ? (firstSym < 0 ? st.layers.length : firstSym) : firstBld;
@@ -450,10 +469,10 @@
 
   function applyStyle() {
     if (!map) return;
-    const key = (isNight() ? 'n' : 'd') + S.lang + (baseStyle ? 1 : 0) + (S.city ? S.cityVersion : '');
+    const key = theme() + S.lang + (baseStyle ? 1 : 0) + (S.city ? S.cityVersion : '');
     if (key === styleKey) return;
     styleKey = key;
-    const st = baseStyle && !S.city.demo ? restyle(baseStyle, isNight(), S.lang) : flatStyle(isNight());
+    const st = baseStyle && !S.city.demo ? restyle(baseStyle, theme(), S.lang) : flatStyle(theme());
     if (!baseStyle || S.city.demo) {
       const P = pal();
       st.sources.city_water = { type: 'geojson', data: FC(S.city.water.lines.map((l) => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: l } })).concat(S.city.water.polys.map((p) => ({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [p] } })))) };
@@ -477,7 +496,7 @@
     if (map) { map.remove(); $('map').innerHTML = ''; styleKey = null; }
     const [s, w, n, e] = S.city.bbox;
     map = new ML.Map({
-      container: 'map', style: flatStyle(isNight()), center: VIEW0.center, zoom: VIEW0.zoom, pitch: VIEW0.pitch, bearing: VIEW0.bearing,
+      container: 'map', style: flatStyle(theme()), center: VIEW0.center, zoom: VIEW0.zoom, pitch: VIEW0.pitch, bearing: VIEW0.bearing,
       maxPitch: 70, minZoom: 10.5, maxZoom: 18.5, attributionControl: false, maxBounds: [[w - 0.25, s - 0.15], [e + 0.25, n + 0.15]], antialias: true,
     });
     map.addControl(new ML.AttributionControl({ compact: true }), 'bottom-right');
@@ -485,8 +504,8 @@
     map.once('load', () => setTimeout(foldAttrib, 400)); map.on('styledata', () => setTimeout(foldAttrib, 400));
     map.on('moveend', refreshTiles);
     map.on('styleimagemissing', (ev) => {
-      const k = /^b-(ice|park|wood)-(day|night)$/.exec(ev.id);
-      if (k && !map.hasImage(ev.id)) map.addImage(ev.id, patternImage(k[1], k[2] === 'night'), { pixelRatio: 2 });
+      const k = /^b-(ice|park|wood)-(city|game|night)$/.exec(ev.id);
+      if (k && !map.hasImage(ev.id)) map.addImage(ev.id, patternImage(k[1], k[2]), { pixelRatio: 2 });
     });
     map.on('click', (ev) => onMapClick({ coordinate: [ev.lngLat.lng, ev.lngLat.lat], x: ev.point.x, y: ev.point.y }));
     map.on('error', (ev) => { if (ev && ev.error && /style|layers\[/.test(String(ev.error.message))) console.warn(ev.error.message); });
@@ -528,7 +547,7 @@
 
   function pushRisk() {
     if (!map || !map.getLayer('b-risk')) return;
-    const P = PAL[isNight() ? 'night' : 'day'];
+    const P = PAL[theme()];
     setPaint('b-risk', 'line-color', riskPaint(P)); setPaint('b-risk-glow', 'line-color', riskPaint(P));
     if (map.getLayer('b-risk-glow')) map.setFilter('b-risk-glow', glowFilter());
     setPaint('b-heat', 'heatmap-weight', heatWeight());
@@ -985,6 +1004,15 @@
     b.classList.remove('ready'); void b.offsetWidth;
     if (S.src && S.dst) b.classList.add('ready');
   }
+  function themeBody() {
+    const b = document.body.classList;
+    b.toggle('night', isNight()); b.toggle('day', !isNight()); b.toggle('game', theme() === 'game');
+    const ico = { city: '<svg viewBox="0 0 24 24" width="20" height="20"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+      game: '<svg viewBox="0 0 24 24" width="20" height="20"><rect x="3" y="11" width="6" height="10" rx="1.5" fill="#FF9B85"/><rect x="9.5" y="5" width="6" height="16" rx="1.5" fill="#6FA3FF"/><rect x="16" y="9" width="5" height="12" rx="1.5" fill="#A98BFF"/></svg>',
+      night: '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z" fill="currentColor"/></svg>' };
+    const btn = $('btn-theme');
+    if (btn && btn.dataset.th !== theme()) { btn.dataset.th = theme(); btn.innerHTML = ico[theme()]; btn.title = t('theme_' + theme()); }
+  }
   let NAV = null;
   const NAV_HIDE = /^b-(?!landmarks|heat)|^highway-name|^road_one_way|^poi_/;
   function navLayers(show) {
@@ -1149,7 +1177,13 @@
   $('brain-x').onclick = () => { $('brain').hidden = true; };
   $('marks-x').onclick = () => { $('marks').hidden = true; };
   $('btn-lang').onclick = () => { S.lang = LANGS[(LANGS.indexOf(S.lang) + 1) % LANGS.length]; store.set('boran.lang', S.lang); renderAll(); };
-  $('btn-theme').onclick = () => { S.themeForce = isNight() ? 'day' : 'night'; document.body.classList.toggle('night', isNight()); document.body.classList.toggle('day', !isNight()); renderAll(); };
+  $('btn-theme').onclick = () => {
+    S.themeForce = THEMES[(THEMES.indexOf(theme()) + 1) % THEMES.length];
+    store.set('boran.theme', S.themeForce);
+    themeBody();
+    toast(t('theme_' + theme()));
+    renderAll();
+  };
   $('btn-ice').onclick = () => {
     S.markMode = !S.markMode; $('btn-ice').setAttribute('aria-pressed', String(S.markMode)); $('mark-pop').hidden = true;
     if (S.markMode) { $('brain').hidden = true; closeAlgos(); $('marks').hidden = false; renderMarks(); toast(t('m_hint')); $('panel').classList.add('min'); } else { $('marks').hidden = true; toast(t('m_off')); }

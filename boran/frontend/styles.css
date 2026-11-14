@@ -91,7 +91,7 @@ body.day .wx-temp{background:linear-gradient(180deg,#0E2A4F 10%,#1B7FA8 95%);-we
 #legend{position:fixed;z-index:8;right:calc(var(--sar) + 12px);bottom:calc(var(--sab) + 14px);border-radius:14px;padding:9px 12px 8px;font-size:11px;color:var(--t2);display:grid;grid-template-columns:auto auto;gap:5px 10px;width:150px}
 #legend span{grid-column:1/-1;font-weight:600;font-size:12px;color:var(--t1)}
 #legend i{grid-column:1/-1;height:5px;border-radius:3px;background:linear-gradient(90deg,#4A5A76 0%,#FFB547 55%,#FF4D6A 100%);box-shadow:0 0 10px rgba(255,120,90,.3)}
-body.day #legend i{background:linear-gradient(90deg,#9AA7B6 0%,#F2A93B 55%,#E0344C 100%);box-shadow:none}
+body.day #legend i{background:linear-gradient(90deg,#9AA6B5 0%,#FF8A00 55%,#E0244A 100%);box-shadow:none}
 #legend em{font-style:normal}#legend em:last-child{text-align:right}
 
 #panel{position:fixed;z-index:12;left:calc(var(--sal) + 12px);bottom:calc(var(--sab) + 12px);width:372px;border-radius:var(--r3);max-height:calc(100dvh - 300px);display:flex;flex-direction:column;transition:transform .3s var(--ease)}
@@ -368,3 +368,14 @@ body.navfp .nav-mini{opacity:.92}
   .nav-street{bottom:calc(var(--sab) + 120px);font-size:14px}
   .nav-view button{padding:0 8px;font-size:12px}
 }
+
+body.day:not(.game){--bg0:#E9E4DA;--bg1:#F4F1EA;--glass:rgba(255,253,249,.82);--glass-strong:rgba(255,253,249,.96);--line:rgba(60,48,30,.10);--t1:#1E2430;--t2:#4B5262;--t3:#7A7F8A;--surface:rgba(60,48,30,.05);--surface2:rgba(60,48,30,.09)}
+body.game{--bg0:#DCEBF7;--bg1:#EEF7FD;--ice:#3355FF;--focus:#3355FF;--ok:#12B76A;--warn:#E07000;--bad:#E8264F;--glass:rgba(255,255,255,.84);--glass-strong:rgba(255,255,255,.96);--line:rgba(51,85,255,.14);--t1:#1A2140;--t2:#4A5578;--surface:rgba(51,85,255,.06);--surface2:rgba(51,85,255,.11)}
+body.game .cta{background:linear-gradient(135deg,#4F6BFF,#8A4DFF);box-shadow:0 10px 26px rgba(79,107,255,.35)}
+body.game .cta.walk{background:var(--surface2);color:var(--t1);box-shadow:none}
+body.game #legend i{background:linear-gradient(90deg,#8796AE 0%,#FF6A00 55%,#E8264F 100%)}
+body.game .nav-me .b{fill:#3355FF}
+body.game .nav-me .h{fill:rgba(51,85,255,.2)}
+body.game .nav-mini .m-w{stroke:#3355FF}body.game .nav-mini .m-r{stroke:#C2259E}
+body.game .nav-mini .m-me circle{fill:#3355FF}
+body.game .tool.glass,body.game .glass{border-color:rgba(51,85,255,.12)}
