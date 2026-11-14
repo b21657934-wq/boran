@@ -13,7 +13,7 @@ MIRRORS = [
     "https://overpass.kumi.systems/api/interpreter",
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ]
-WALK = "primary|secondary|tertiary|residential|living_street|pedestrian|footway|path|unclassified|cycleway|steps"
+WALK = "trunk|primary|secondary|tertiary|residential|living_street|pedestrian|footway|path|unclassified|cycleway|steps|service|track"
 CLEANED = {"primary", "secondary", "tertiary", "pedestrian"}
 BIG = {"primary", "secondary"}
 FEATURE_BITS = {"shade": 1, "open": 2, "uncleaned": 4, "stop": 8, "bridge": 16}
@@ -148,17 +148,22 @@ def build(raw, demo=False):
         st["warm"] = any(True for _ in wgrid.near(x, y, 120.0))
 
     use = {}
-    ways = []
+    ways, areas = [], []
     for el in raw["roads"]:
         if el.get("type") != "way" or not el.get("geometry") or not el.get("nodes"):
             continue
         tags = el.get("tags", {})
-        if tags.get("access") in ("private", "no") or tags.get("foot") == "no" or tags.get("area") == "yes":
+        if tags.get("access") in ("private", "no") or tags.get("foot") == "no" or tags.get("service") == "drive-through":
             continue
         ids = el["nodes"]
         geom = el["geometry"]
         if len(ids) != len(geom) or len(ids) < 2:
             continue
+        if tags.get("area") == "yes":
+            if len(ids) >= 4 and ids[0] == ids[-1] and tags.get("highway") in ("pedestrian", "footway", "path", "service"):
+                areas.append((ids, geom, tags))
+            else:
+                continue
         ways.append((ids, geom, tags))
         for k, nid in enumerate(ids):
             use[nid] = use.get(nid, 0) + (2 if k in (0, len(ids) - 1) else 1)
@@ -218,6 +223,41 @@ def build(raw, demo=False):
                     edge["n"] = nid_name
                 edges.append(edge)
 
+    refs = {}
+    for wi, (ids, _, _) in enumerate(ways):
+        for nid in set(ids):
+            refs[nid] = refs.get(nid, 0) + 1
+    for ids, geom, tags in areas:
+        ring = [proj.xy(g["lon"], g["lat"]) for g in geom]
+        entries = []
+        for nid, g in zip(ids[:-1], geom[:-1]):
+            if refs.get(nid, 0) >= 2 and nid in node_index and nid not in [e[0] for e in entries]:
+                entries.append((nid, g))
+        entries = entries[:40]
+        nm = name_id(tags)
+        for i in range(len(entries)):
+            for j in range(i + 1, len(entries)):
+                (na, ga), (nb, gb) = entries[i], entries[j]
+                length = haversine(ga["lon"], ga["lat"], gb["lon"], gb["lat"])
+                if length < 3 or length > 450:
+                    continue
+                ax, ay = proj.xy(ga["lon"], ga["lat"])
+                bx, by = proj.xy(gb["lon"], gb["lat"])
+                if not all(_inside(ring, ax + (bx - ax) * f, ay + (by - ay) * f) for f in (0.1, 0.3, 0.5, 0.7, 0.9)):
+                    continue
+                mx, my = (ax + bx) / 2, (ay + by) / 2
+                near_b = list(bgrid.near(mx, my, 120.0))
+                mask = FEATURE_BITS["uncleaned"] if tags.get("highway") != "pedestrian" else 0
+                if not near_b:
+                    mask |= FEATURE_BITS["open"]
+                if any(h >= 20 for d, h in near_b if d <= 60 * 60):
+                    mask |= FEATURE_BITS["shade"]
+                edge = {"u": node_index[na], "v": node_index[nb], "len": length, "mask": mask, "warm": any(True for _ in wgrid.near(mx, my, 90.0)),
+                        "hw": "pedestrian", "p": [[q(ga["lon"]), q(ga["lat"])], [q(gb["lon"]), q(gb["lat"])]]}
+                if nm >= 0:
+                    edge["n"] = nm
+                edges.append(edge)
+
     comp = _largest_component(len(nodes), edges)
     remap, new_nodes = {}, []
     for i, c in enumerate(comp):
@@ -241,6 +281,17 @@ def build(raw, demo=False):
         "stops": stops,
         "warm": warm,
     }
+
+
+def _inside(ring, x, y):
+    c = False
+    n = len(ring)
+    for i in range(n):
+        x1, y1 = ring[i]
+        x2, y2 = ring[(i + 1) % n]
+        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1 + 1e-12) + x1:
+            c = not c
+    return c
 
 
 def _largest_component(n, edges):

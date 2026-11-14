@@ -130,3 +130,20 @@ def test_ucs_equals_astar_on_real_shape_graph():
     bf = search.bfs(city, a, b, an["risks"], an["wind_k"])
     d = search.dfs(city, a, b, an["risks"], an["wind_k"])
     assert len(bf["edges"]) <= len(d["edges"])
+
+
+def test_pedestrian_area_gets_shortcuts():
+    from boran import graph
+    lat0, lon0, d = 51.10, 71.43, 0.0009
+    sq = [(1, lon0, lat0), (2, lon0 + d * 1.6, lat0), (3, lon0 + d * 1.6, lat0 + d), (4, lon0, lat0 + d), (1, lon0, lat0)]
+    def way(i, pts, tags):
+        return {"type": "way", "id": i, "nodes": [p[0] for p in pts], "geometry": [{"lon": p[1], "lat": p[2]} for p in pts], "tags": tags}
+    raw = {"roads": [
+        way(10, sq, {"highway": "pedestrian", "area": "yes"}),
+        way(11, [(5, lon0 - d, lat0 - d), (1, lon0, lat0)], {"highway": "footway"}),
+        way(12, [(3, lon0 + d * 1.6, lat0 + d), (6, lon0 + d * 2.6, lat0 + d * 2)], {"highway": "service"}),
+    ], "buildings": [], "misc": []}
+    data = graph.build(raw)
+    diag = [e for e in data["edges"] if e["hw"] == "pedestrian" and len(e["p"]) == 2 and {tuple(e["p"][0]), tuple(e["p"][1])} == {(round(lon0, 5), round(lat0, 5)), (round(lon0 + d * 1.6, 5), round(lat0 + d, 5))}]
+    assert diag, "plaza should be crossable diagonally"
+    assert any(e["hw"] == "service" for e in data["edges"])
