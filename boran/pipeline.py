@@ -61,7 +61,7 @@ def _stop_side(city, line, stop, at_end):
 
 
 def _bus_path(city, an, a, b):
-    for allowed, flow in ((lambda ed: ed["hw"] in ROADS, _with_flow), (lambda ed: ed["hw"] in ROADS, None), (None, None)):
+    for allowed, flow in ((lambda ed: ed["hw"] in ROADS or ed["hw"] == "service", _with_flow), (lambda ed: ed["hw"] in ROADS, None), (None, None)):
         res = astar.search(city, a, b, an["risks"], an["wind_k"], safe=False, allow=allowed, weight=lambda ed: ROAD_W.get(ed["hw"], 3.0), allow_dir=flow)
         if res is not None:
             line = astar.describe(city, res, an["risks"], an["wind_k"])
