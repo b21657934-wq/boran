@@ -1,8 +1,12 @@
 (function () {
   const EC = 40075016.686;
   const RAD = Math.PI / 180;
-  const HALF = { trunk: 11, primary: 9.5, secondary: 7.5, tertiary: 6, unclassified: 3.75, residential: 3.75, living_street: 3.75, service: 2.25 };
-  const TRAFFIC = { trunk: 3, primary: 2, secondary: 2, tertiary: 1 };
+  const WIDTH = { trunk: [21, 10.5], primary: [14, 7], secondary: [14, 7], tertiary: [7, 4], unclassified: [6, 3.5], residential: [6, 3.5], living_street: [6, 3.5], service: [4.5, 3] };
+  const NLANE = { trunk: 3, primary: 2, secondary: 2, tertiary: 1, unclassified: 1, residential: 1, living_street: 1, service: 1 };
+  const halfOf = (hw, ow) => (WIDTH[hw] ? WIDTH[hw][ow ? 1 : 0] / 2 : 0);
+  const laneW = (hw, ow) => (WIDTH[hw] ? (ow ? WIDTH[hw][1] / NLANE[hw] : WIDTH[hw][0] / (2 * NLANE[hw])) : 3.5);
+  const rightLane = (hw, ow) => (WIDTH[hw] ? (ow ? halfOf(hw, 1) - laneW(hw, 1) / 2 : (NLANE[hw] - 0.5) * laneW(hw, 0)) : 1.9);
+  const FLOW = { trunk: [16, 1.0], primary: [14, 0.9], secondary: [13, 0.75], tertiary: [11, 0.45], unclassified: [9, 0.2], residential: [8, 0.15] };
   const VMAX = { trunk: 16, primary: 14, secondary: 13, tertiary: 10 };
   const CAR_COLS = ['#F4F5F7', '#C9CFD6', '#2A2E35', '#1F3A5F', '#8E1B24', '#E8B22E', '#5B6B7A', '#E9EDF1', '#3B4A3F', '#B9BEC4'];
   const COATS = ['#2F3B4C', '#7A2E2E', '#2E5E4E', '#4B3F72', '#8A6D3B', '#1F2933', '#A3472E', '#36506B'];
@@ -87,7 +91,8 @@
     const segs = (plan && plan.segs) || [];
     const hwAt = (s) => { const d = (s - pre) / scale; if (d < 0) return null; for (let i = segs.length - 1; i >= 0; i--) if (segs[i][0] <= d + 0.01) return segs[i][1]; return null; };
     const P = base.pts, n = P.length, C = base.cum;
-    const offAt = (s) => { const hw = hwAt(s); return HALF[hw] ? HALF[hw] + 2.0 : 0; };
+    const segAt = (s) => { const d = (s - pre) / scale; if (d < 0) return null; for (let i = segs.length - 1; i >= 0; i--) if (segs[i][0] <= d + 0.01) return segs[i]; return null; };
+    const offAt = (s) => { const sg = segAt(s); return sg && WIDTH[sg[1]] ? halfOf(sg[1], sg[3]) + 2.0 : 0; };
     const ahead = (i) => { let j = i + 1; while (j < n - 1 && C[j] - C[i] < 2.5) j++; return j; };
     const K = [0];
     for (let i = 1; i < n - 1; i++) {
@@ -208,7 +213,11 @@
       map.addSource('n-dyn', { type: 'geojson', data: FC([]), maxzoom: 20, tolerance: 0 });
       map.addSource('n-glass', { type: 'geojson', data: FC([]), maxzoom: 20 });
       map.addSource('n-labels', { type: 'geojson', data: FC([]) });
+      map.addSource('n-marks', { type: 'geojson', data: FC([]), maxzoom: 20 });
       const W = (m) => ['interpolate', ['exponential', 2], ['zoom'], 14, m * 0.2, 22, m * 51];
+      const MC = night() ? '#AEB9CC' : '#FFFFFF';
+      map.addLayer({ id: 'n-mark-solid', type: 'line', source: 'n-marks', minzoom: 16, filter: ['==', ['get', 'd'], 0], paint: { 'line-color': MC, 'line-opacity': 0.9, 'line-width': W(0.14) } }, before);
+      map.addLayer({ id: 'n-mark-dash', type: 'line', source: 'n-marks', minzoom: 16, filter: ['==', ['get', 'd'], 1], paint: { 'line-color': MC, 'line-opacity': 0.85, 'line-width': W(0.14), 'line-dasharray': [20, 40] } }, before);
       map.addLayer({ id: 'n-flat', type: 'fill', source: 'n-flat', paint: { 'fill-color': ['get', 'c'], 'fill-opacity': ['get', 'o'] } }, before);
       map.addLayer({ id: 'n-walk', type: 'line', source: 'n-walk', filter: ['==', ['get', 'k'], 'side'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': night() ? '#1F2A3D' : '#DCE3EA', 'line-width': W(2.8) } }, before);
       const GW = (k) => ['interpolate', ['exponential', 2], ['zoom'], 14, 3 * k, 17, 6 * k, 19, 10 * k, 21, 18 * k, 23, 60 * k];
@@ -223,8 +232,8 @@
       if (run) { run.staticDirty = true; run.flatDirty = true; run.walkDirty = true; }
     }
     function removeLayers() {
-      ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-done', 'n-guide', 'n-guide-case', 'n-walk', 'n-flat'].forEach((id) => { if (map.getLayer(id)) map.removeLayer(id); });
-      ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-walk', 'n-flat'].forEach((id) => { if (map.getSource(id)) map.removeSource(id); });
+      ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-done', 'n-guide', 'n-guide-case', 'n-walk', 'n-flat', 'n-mark-solid', 'n-mark-dash'].forEach((id) => { if (map.getLayer(id)) map.removeLayer(id); });
+      ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-walk', 'n-flat', 'n-marks'].forEach((id) => { if (map.getSource(id)) map.removeSource(id); });
     }
     const FC = (f) => ({ type: 'FeatureCollection', features: f });
     const setData = (id, f) => { const s = map.getSource(id); if (s) s.setData(FC(f)); };
@@ -262,33 +271,15 @@
         for (let i = 0; i < 4; i++) { if (q < acc + CYCLE[i]) return { name: names[i], left: acc + CYCLE[i] - q, i }; acc += CYCLE[i]; }
         return { name: 'x', left: CYCLE[0], i: 0 };
       };
-      const lanes = TRAFFIC[c.hw] ? c.lanes : 1, med = c.median || 0;
-      const stopS = zs - 4.2;
-      for (let i = 0; i < lanes; i++) for (const dir of [1, -1]) {
-        const lat = dir > 0 ? -(med + 1.75 + 3.5 * i) : med + 1.75 + 3.5 * i;
-        const v = [u[0] * dir, u[1] * dir];
-        const o = [Zr[0] - v[0] * zs + nL[0] * lat, Zr[1] - v[1] * zs + nL[1] * lat];
-        X.lanes.push(new Lane({ o, v, hd: headingOf(v), len: L, lat, dir, vmax: VMAX[c.hw] || 10, density: c.hw === 'tertiary' ? 0.55 : 1, stops: [{ id: X.id, s: stopS, red: X.carRed }], live: false }));
-      }
+      X.flow = [];
       X.width = 2 * c.half;
       return X;
     }
 
     function flatForCrossing(F, X) {
       const out = [], asphalt = night() ? '#1A212C' : '#5C6570', paint = night() ? '#C9D3E0' : '#F4F6F8', snow = night() ? '#2B3647' : '#F7F9FB';
-      const h = headingOf(X.u), along = 220;
-      out.push(flat(rect(F, X.Zr, h, along, X.width), asphalt));
-      const med = X.c.median || 0, lanes = X.lanes.length / 2;
-      if (med > 0.6) out.push(flat(rect(F, X.Zr, h, along, med * 2 - 0.4), snow));
-      else for (const o of [-0.12, 0.12]) out.push(flat(rect(F, [X.Zr[0] + X.nL[0] * o, X.Zr[1] + X.nL[1] * o], h, along, 0.12), paint));
-      for (let k = 1; k < lanes; k++) for (const sgn of [1, -1]) {
-        const off = sgn * (med + 3.5 * k);
-        for (let s = -along / 2 + 3; s < along / 2; s += 9) {
-          if (Math.abs(s) < 6) continue;
-          const c = [X.Zr[0] + X.u[0] * s + X.nL[0] * off, X.Zr[1] + X.u[1] * s + X.nL[1] * off];
-          out.push(flat(rect(F, c, h, 3, 0.14), paint, 0.85));
-        }
-      }
+      const h = headingOf(X.u), med = X.c.median || 0;
+      out.push(flat(rect(F, X.Zr, h, 5.2, X.width + 0.4), asphalt, 1));
       for (let w = -X.half + 0.6; w <= X.half - 0.5; w += 1.0) {
         if (med > 0.6 && Math.abs(w) < med) continue;
         const c = [X.Zr[0] + X.nL[0] * w, X.Zr[1] + X.nL[1] * w];
@@ -327,10 +318,10 @@
       return out;
     }
 
-    function stopScene(F, ridePath, atEnd, stop, rnd, lane) {
+    function stopScene(F, ridePath, atEnd, stop, rnd, curbOff) {
       const s = atEnd ? ridePath.len : 0;
       const p = ridePath.pos(s), t = ridePath.tangent(s, 6), r = [t[1], -t[0]], h = headingOf(t);
-      const curb = lane + 1.4;
+      const curb = curbOff + 0.2;
       const shelter = [p[0] + r[0] * (curb + 3.4), p[1] + r[1] * (curb + 3.4)];
       const spot = [p[0] + r[0] * (curb + 1.2) - t[0] * 7, p[1] + r[1] * (curb + 1.2) - t[1] * 7];
       const st = { shelter, spot, p, t, r, h, curb, name: stop && stop.name ? stop.name : '', people: [] };
@@ -400,38 +391,6 @@
         const crossings = ((navPlan && navPlan.cross) || []).map((c, i) => crossingScene(F, walk, c, phases.length * 10 + i, rnd));
         const turns = ((navPlan && navPlan.turns) || []).map((x) => Object.assign({}, x, { s: walk.at(x.d) }));
         const ycors = [];
-        const segs = (navPlan && navPlan.segs) || [];
-        let runStart = null, runHw = null;
-        const close = (endD) => {
-          if (runStart === null) return;
-          const a = walk.pre + runStart * walk.scale, b = walk.pre + endD * walk.scale;
-          if (b - a > 25) {
-            const line2 = walk.base.slice(a, b, 70, 70);
-            const lanes = TRAFFIC[runHw] || 1;
-            const cor = { lanes: [] };
-            for (let i = 0; i < lanes; i++) for (const dir of [1, -1]) {
-              const lat = dir > 0 ? -(1.75 + 3.5 * i) : 1.75 + 3.5 * i;
-              const stops = [];
-              crossings.forEach((X) => {
-                if (!X.sig) return;
-                const cb = walk.pre + X.c.d * walk.scale;
-                if (cb < a - 5 || cb > b + 5) return;
-                const cY = cb - a + 70;
-                const sY = dir > 0 ? cY - X.half - 2.5 : line2.len - cY - X.half - 2.5;
-                stops.push({ id: X.id + 'y', s: sY, red: () => X.phase(run ? run.wt : 0).name !== 'p' });
-              });
-              cor.lanes.push(new Lane({ line: line2, dir, lat, len: line2.len, vmax: VMAX[runHw] || 10, density: runHw === 'tertiary' ? 0.4 : 0.75, stops, live: false }));
-            }
-            cor.a = a; cor.b = b;
-            ycors.push(cor);
-          }
-          runStart = null;
-        };
-        segs.forEach(([d, hw]) => {
-          if (TRAFFIC[hw]) { if (runStart === null || hw !== runHw) { close(d); runStart = d; runHw = hw; } }
-          else close(d);
-        });
-        close(navPlan ? navPlan.length : walk.base.len / walk.scale);
         phases.push({ type: 'walk', kind, walk, crossings, turns, ycors, s: 0 });
       };
       if (!tr) {
@@ -441,11 +400,12 @@
         const core = new Path(ridePts);
         const path = core.slice(0, core.len, 170, 170);
         const rsegs = (tr.nav && tr.nav.ride_segs) || [], rk = core.len / Math.max(1, (tr.nav && tr.nav.ride_len) || core.len);
-        const halfAt = (sp) => { const d = (clamp(sp, 170, 170 + core.len) - 170) / rk; let hw = rsegs.length ? rsegs[0][1] : 'residential'; for (const sg of rsegs) { if (sg[0] <= d) hw = sg[1]; else break; } return HALF[hw] || 3.75; };
-        const laneAt = (sp) => { let a = 0; for (const k of [-24, -12, 0, 12, 24]) { const h = halfAt(sp + k); a += Math.min(3.6, Math.max(1.9, h - 1.9)); } return a / 5; };
+        const segAt = (sp) => { const d = (clamp(sp, 170, 170 + core.len) - 170) / rk; let sg = rsegs.length ? rsegs[0] : [0, 'residential', 0]; for (const x of rsegs) { if (x[0] <= d) sg = x; else break; } return sg; };
+        const laneAt = (sp) => { let a = 0; for (const k of [-24, -12, 0, 12, 24]) { const sg = segAt(sp + k); a += rightLane(sg[1], sg[2]); } return a / 5; };
+        const curbAt = (sp) => { const sg = segAt(sp); return Math.max(halfOf(sg[1], sg[2]), laneAt(sp) + 1.6); };
         path.lane = laneAt;
-        const stA = stopScene(F, path.slice(170, path.len - 170), false, tr.stops[0], rnd, laneAt(170));
-        const stB = stopScene(F, path.slice(170, path.len - 170), true, tr.stops[1], rnd, laneAt(path.len - 170));
+        const stA = stopScene(F, path.slice(170, path.len - 170), false, tr.stops[0], rnd, curbAt(178));
+        const stB = stopScene(F, path.slice(170, path.len - 170), true, tr.stops[1], rnd, curbAt(path.len - 178));
         addWalk(tr.legs[0], tr.nav && tr.nav.legs[0], 'stop', null, stA.spot);
         phases.push({ type: 'stop', stop: stA, path, t0: null });
         phases.push({ type: 'ride', path, start: 170, end: path.len - 170, stops: ((tr.nav && tr.nav.ride_stops) || []).map((x) => Object.assign({}, x, { s: 170 + x.d * (core.len / Math.max(1, sumLen(tr.ride, F))) })), stopB: stB });
@@ -488,6 +448,122 @@
       });
       setData('n-walk', out);
     }
+
+    const pkey = (p) => p[0].toFixed(5) + ',' + p[1].toFixed(5);
+    function nearestOn(path, pt) {
+      let best = Infinity, bs = 0;
+      for (let s = 0; s <= path.len; s += 2) { const q = path.pos(s), d = Math.hypot(q[0] - pt[0], q[1] - pt[1]); if (d < best) { best = d; bs = s; } }
+      for (let s = Math.max(0, bs - 2); s <= Math.min(path.len, bs + 2); s += 0.25) { const q = path.pos(s), d = Math.hypot(q[0] - pt[0], q[1] - pt[1]); if (d < best) { best = d; bs = s; } }
+      return [bs, best];
+    }
+    function strokesFrom(rows) {
+      const F = run.F;
+      const E = rows.map((r) => { let p = r.p; if (r.ow === -1) p = p.slice().reverse(); return { p, xy: p.map((q) => F.xy(q)), hw: r.hw, ow: r.ow ? 1 : 0, used: false }; });
+      const idx = new Map();
+      const add = (k, i) => { if (!idx.has(k)) idx.set(k, []); idx.get(k).push(i); };
+      E.forEach((e, i) => { e.k0 = pkey(e.p[0]); e.k1 = pkey(e.p[e.p.length - 1]); add(e.k0, i); add(e.k1, i); });
+      const hd2 = (a, b) => headingOf(unit(b[0] - a[0], b[1] - a[1]));
+      const out = [];
+      E.forEach((e0) => {
+        if (e0.used) return;
+        e0.used = true;
+        let pts = e0.xy.slice(), kEnd = e0.k1, kStart = e0.k0;
+        for (let g = 0; g < 60; g++) {
+          const hin = hd2(pts[pts.length - 2], pts[pts.length - 1]);
+          let best = null, bestA = 35;
+          for (const j of idx.get(kEnd) || []) {
+            const e = E[j];
+            if (e.used || e.hw !== e0.hw || e.ow !== e0.ow) continue;
+            let xy = e.xy, k = e.k1;
+            if (e.k0 !== kEnd) { if (e.ow) continue; xy = xy.slice().reverse(); k = e.k0; }
+            const a = Math.abs(angDiff(hin, hd2(xy[0], xy[1])));
+            if (a < bestA) { bestA = a; best = [j, xy, k]; }
+          }
+          if (!best) break;
+          E[best[0]].used = true; pts = pts.concat(best[1].slice(1)); kEnd = best[2];
+        }
+        for (let g = 0; g < 60; g++) {
+          const hout = hd2(pts[0], pts[1]);
+          let best = null, bestA = 35;
+          for (const j of idx.get(kStart) || []) {
+            const e = E[j];
+            if (e.used || e.hw !== e0.hw || e.ow !== e0.ow) continue;
+            let xy = e.xy, k = e.k0;
+            if (e.k1 !== kStart) { if (e.ow) continue; xy = xy.slice().reverse(); k = e.k1; }
+            const n = xy.length, a = Math.abs(angDiff(hd2(xy[n - 2], xy[n - 1]), hout));
+            if (a < bestA) { bestA = a; best = [j, xy, k]; }
+          }
+          if (!best) break;
+          E[best[0]].used = true; pts = best[1].slice(0, -1).concat(pts); kStart = best[2];
+        }
+        const path = new Path(pts);
+        if (path.len >= 40) out.push({ id: kStart + '|' + kEnd + '|' + e0.hw, path, hw: e0.hw, ow: e0.ow });
+      });
+      return out;
+    }
+    function laneSet(st) {
+      const [vmax, density] = FLOW[st.hw] || [10, 0.3], n = NLANE[st.hw] || 1, lw = laneW(st.hw, st.ow), L = [];
+      if (st.ow) for (let k = 0; k < n; k++) L.push(new Lane({ line: st.path, dir: 1, lat: -((k - (n - 1) / 2) * lw), len: st.path.len, vmax, density: density * (n > 1 ? 0.8 : 1), stops: [], live: false }));
+      else for (let k = 0; k < n; k++) for (const dir of [1, -1]) L.push(new Lane({ line: st.path, dir, lat: -dir * (k + 0.5) * lw, len: st.path.len, vmax, density: density * 0.8, stops: [], live: false }));
+      return L;
+    }
+    function marksFor(st, out) {
+      const F = run.F, n = NLANE[st.hw] || 1, lw = laneW(st.hw, st.ow), P = st.path;
+      const offs = [];
+      if (st.ow) for (let k = 1; k < n; k++) offs.push([(k - n / 2) * lw, 1]);
+      else { offs.push([0.13, 0], [-0.13, 0]); for (let k = 1; k < n; k++) offs.push([k * lw, 1], [-k * lw, 1]); }
+      offs.forEach(([o, dash]) => {
+        const pts = [];
+        for (let s = 0; s <= P.len; s += 3) { const q = P.pos(s), t = P.tangent(s, 3); pts.push(F.ll([q[0] - t[1] * o, q[1] + t[0] * o])); }
+        if (pts.length > 1) out.push({ type: 'Feature', properties: { d: dash }, geometry: { type: 'LineString', coordinates: pts } });
+      });
+    }
+    function buildTraffic() {
+      const ph = run.plan.phases[run.i];
+      if (!ph || ph.type !== 'walk' || !ctx.roadsNear) return;
+      const F = run.F, W = ph.walk.path.pos(run.s);
+      const rows = ctx.roadsNear(F.ll(W), 340);
+      if (!rows.length) return false;
+      const strokes = strokesFrom(rows);
+      const keep = new Map();
+      const crosses = ph.crossings.filter((X) => X.sOut > run.s - 40 && X.sIn < run.s + 300);
+      const look = [];
+      for (let s = run.s; s <= Math.min(ph.walk.path.len, run.s + 260); s += 30) look.push([ph.walk.path.pos(s), ph.walk.path.tangent(s, 8)]);
+      for (const st of strokes) {
+        let use = false;
+        for (const X of crosses) { const [ss, d] = nearestOn(st.path, X.Zr); const t = st.path.tangent(ss, 4); if (d < X.half + 5 && Math.abs(t[0] * X.u[0] + t[1] * X.u[1]) > 0.75) { use = true; break; } }
+        if (!use) for (const [q, tq] of look) { const [ss, d] = nearestOn(st.path, q); const t = st.path.tangent(ss, 4); if (d < halfOf(st.hw, st.ow) + 8 && Math.abs(t[0] * tq[0] + t[1] * tq[1]) > 0.85) { use = true; break; } }
+        if (use) keep.set(st.id, st);
+      }
+      const old = run.traffic || new Map(), next = new Map();
+      keep.forEach((st, id) => { next.set(id, old.get(id) || { st, lanes: laneSet(st) }); });
+      run.traffic = next;
+      ph.crossings.forEach((X) => { X.flow = []; });
+      const all = [];
+      next.forEach((T) => {
+        T.lanes.forEach((ln) => {
+          ln.stops = [];
+          ph.crossings.forEach((X) => {
+            const [ss, d] = nearestOn(T.st.path, X.Zr);
+            const t = T.st.path.tangent(ss, 4), par = Math.abs(t[0] * X.u[0] + t[1] * X.u[1]);
+            const sz = ln.dir > 0 ? ss : T.st.path.len - ss;
+            if (par > 0.75 && d < X.half + 5) {
+              X.flow.push({ lane: ln, sz });
+              ln.stops.push({ id: X.id, s: sz - 4.4, red: X.carRed });
+            } else if (par < 0.45 && d < X.half + 8 && X.sig) {
+              ln.stops.push({ id: X.id + 'p', s: sz - X.half - 3.5, red: () => X.phase(run ? run.wt : 0).name !== 'p' });
+            }
+          });
+          all.push(ln);
+        });
+      });
+      warm(all);
+      const marks = [];
+      next.forEach((T) => marksFor(T.st, marks));
+      setData('n-marks', marks);
+      return true;
+    }
+    function trafficLanes() { const out = []; if (run.traffic) run.traffic.forEach((T) => out.push(...T.lanes)); return out; }
 
     function activeCrossings(ph) {
       if (!ph || ph.type !== 'walk') return [];
@@ -656,12 +732,12 @@
         if (run.s < curb - 30) break;
         if (!X.sig) X.yield = run.s > curb - 26;
         let ok = false;
-        const carsOnZebra = X.lanes.some((L) => L.cars.some((c) => Math.abs(c.s - L.len / 2) < c.len / 2 + 2.6));
+        const carsOnZebra = X.flow.some(({ lane, sz }) => lane.cars.some((c) => Math.abs(c.s - sz) < c.len / 2 + 2.6));
         if (X.sig) {
           const ph2 = X.phase(run.wt);
           ok = ph2.name === 'p' && ph2.left > 3.5 && !carsOnZebra;
         } else {
-          ok = !carsOnZebra && X.lanes.every((L) => L.cars.every((c) => { const front = c.s + c.len / 2; return front > L.len / 2 + 2 || front < L.len / 2 - 32 || c.v < 0.6; }));
+          ok = !carsOnZebra && X.flow.every(({ lane, sz }) => lane.cars.every((c) => { const front = c.s + c.len / 2; return front > sz + 2 || front < sz - 32 || c.v < 0.6; }));
         }
         if (target >= curb && run.s <= curb + 0.01 && !ok) { hold = X; target = Math.min(target, curb); }
         else if (target >= curb && ok) X.passing = true;
@@ -792,7 +868,7 @@
     function dynamic() {
       const F = run.F, out = [], ph = run.plan.phases[run.i];
       const lanes = [];
-      if (ph && ph.type === 'walk') { activeCrossings(ph).forEach((X) => lanes.push(...X.lanes)); activeYcors(ph).forEach((c) => lanes.push(...c.lanes)); }
+      if (ph && ph.type === 'walk') lanes.push(...trafficLanes());
       lanes.forEach((L) => L.cars.forEach((c) => carFeats(F, L.place(c.s), c, out)));
       run.plan.phases.forEach((p) => {
         if (p.type === 'walk') p.crossings.forEach((X) => {
@@ -833,11 +909,10 @@
       if (!ph) return;
       let done = false;
       if (ph.type === 'walk') {
-        const act = activeCrossings(ph), lanes = [];
-        act.forEach((X) => lanes.push(...X.lanes));
-        activeYcors(ph).forEach((c) => lanes.push(...c.lanes));
-        warm(lanes);
-        run.lanes.forEach((L) => { if (!lanes.includes(L)) cool([L]); });
+        const bucket = Math.floor(run.s / 90) + ':' + run.i;
+        run.trT = (run.trT || 0) + dtR;
+        if (run.trKey !== bucket || (!run.traffic && run.trT > 1)) { run.trT = 0; if (buildTraffic() !== false) run.trKey = bucket; }
+        const lanes = trafficLanes();
         run.lanes = lanes;
         lanes.forEach((L) => L.step(dtW, run.wt, run.rnd));
         done = stepWalk(ph, dtw, dtW);
@@ -861,7 +936,7 @@
       const ph = run.plan.phases[run.i];
       if (ph.type === 'stop') { run.fromCam = Object.assign({}, run.cam); run.bus.rideT = 0; }
       if (ph.type === 'ride') { run.fromCam = Object.assign({}, run.cam); run.alT = 0; run.bus.v = 0; }
-      if (ph.type === 'walk') { cool(run.lanes); run.lanes = []; }
+      if (ph.type === 'walk') { cool(run.lanes); run.lanes = []; run.traffic = null; run.trKey = null; setData('n-marks', []); }
       run.i += 1; run.s = 0; run.stopT = 0;
       const nx = run.plan.phases[run.i];
       if (nx && nx.type === 'walk' && run.i > 0) { run.walkDirty = true; }
@@ -959,6 +1034,7 @@
       const lens = phs.map((ph) => (ph.type === 'walk' ? ph.walk.path.len : ph.type === 'ride' ? ph.end - ph.start : ph.type === 'stop' ? 300 : 0));
       let target = frac * lens.reduce((a, b) => a + b, 0);
       if (run.i < phs.length && phs[run.i].type === 'walk') { cool(run.lanes); run.lanes = []; }
+      run.traffic = null; run.trKey = null;
       for (let i = 0; i < phs.length; i++) {
         if (target <= lens[i] || i === phs.length - 1) {
           run.i = i;

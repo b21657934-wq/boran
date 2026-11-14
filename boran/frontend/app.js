@@ -165,19 +165,20 @@
     return g.getImageData(0, 0, n, n);
   }
   function roadMeters(id) {
-    const c = /casing/.test(id) ? 2.4 : 0;
-    if (/motorway(?!_link)/.test(id)) return [24 + c];
-    if (/trunk_primary/.test(id)) return [19 + c, { trunk: 22 + c }];
-    if (/secondary_tertiary/.test(id)) return [12 + c, { secondary: 15 + c }];
-    if (/link/.test(id)) return [7 + c];
-    if (/service_track/.test(id)) return [4.5 + c];
-    if (/path_pedestrian/.test(id)) return [2.4];
-    if (/minor|street/.test(id)) return [7.5 + c];
+    const c = /casing/.test(id) ? 2.4 : 0, A = (a, b) => [a + c, b + c];
+    if (/motorway(?!_link)/.test(id)) return { def: A(24, 12) };
+    if (/trunk_primary/.test(id)) return { def: A(14, 7), by: { trunk: A(21, 10.5) } };
+    if (/secondary_tertiary/.test(id)) return { def: A(7, 4), by: { secondary: A(14, 7) } };
+    if (/link/.test(id)) return { def: A(7, 4) };
+    if (/service_track/.test(id)) return { def: A(4.5, 3) };
+    if (/path_pedestrian/.test(id)) return { def: [2.4, 2.4] };
+    if (/minor|street/.test(id)) return { def: A(6, 3.5) };
     return null;
   }
   function realWidth(w, spec) {
     if (!spec || !Array.isArray(w) || w[0] !== 'interpolate' || !Array.isArray(w[2]) || w[2][0] !== 'zoom') return w;
-    const [m, by] = spec, px = (v, z) => +(v * Math.pow(2, z) / 98325).toFixed(2);
+    const px = (v, z) => +(v * Math.pow(2, z) / 98325).toFixed(2);
+    const one = ['!=', ['coalesce', ['get', 'oneway'], 0], 0];
     const out = w.slice(0, 3);
     let last = 0;
     for (let i = 3; i < w.length - 1; i += 2) {
@@ -185,10 +186,10 @@
       if (w[i] < 16.5) { out.push(w[i], w[i + 1]); last = w[i + 1]; }
     }
     for (let z = 17; z <= 24; z++) {
-      const base = Math.max(last, px(m, z));
-      if (by) { const mt = ['match', ['get', 'class']]; for (const k in by) mt.push(k, Math.max(last, px(by[k], z))); mt.push(base); out.push(z, mt); }
-      else out.push(z, base);
-      last = base;
+      const v = (pair) => ['case', one, Math.max(last, px(pair[1], z)), Math.max(last, px(pair[0], z))];
+      if (spec.by) { const mt = ['match', ['get', 'class']]; for (const k in spec.by) mt.push(k, v(spec.by[k])); mt.push(v(spec.def)); out.push(z, mt); }
+      else out.push(z, v(spec.def));
+      last = Math.max(last, px(spec.def[1], z));
     }
     return out;
   }
@@ -315,9 +316,24 @@
     const all = arr.map(([p, m, b]) => ({ type: 'Feature', properties: { m, b }, geometry: { type: 'LineString', coordinates: p } }));
     all.big = all.filter((f) => f.properties.b === 1);
     all.mid = arr.map(([p]) => p[p.length >> 1]);
+    all.raw = arr;
     return all;
   }
   const tileKey = (lon, lat) => { const [s, w] = S.city.bbox, [dy, dx] = S.city.cell; return Math.floor((lat - s) / dy) + '_' + Math.floor((lon - w) / dx); };
+  function roadsNear(ll, r) {
+    const [lon, lat] = ll, kx = 111320 * Math.cos(lat * Math.PI / 180), out = [];
+    const [r0, q0] = tileKey(lon, lat).split('_').map(Number);
+    for (let a = r0 - 1; a <= r0 + 1; a++) for (let b = q0 - 1; b <= q0 + 1; b++) {
+      const k = a + '_' + b, f = S.tiles.get(k);
+      if (!f) { loadTile(k); continue; }
+      for (const row of f.raw) {
+        if (!row[3]) continue;
+        const p = row[0];
+        if ([p[0], p[p.length >> 1], p[p.length - 1]].some((q) => Math.hypot((q[0] - lon) * kx, (q[1] - lat) * 110540) < r)) out.push({ p, hw: row[3], ow: row[4] || 0 });
+      }
+    }
+    return out;
+  }
   function loadTile(k) {
     if (S.tiles.has(k)) return Promise.resolve(S.tiles.get(k));
     if (!S.tileSet.has(k)) return Promise.resolve(null);
@@ -511,7 +527,7 @@
     map.on('error', (ev) => { if (ev && ev.error && /style|layers\[/.test(String(ev.error.message))) console.warn(ev.error.message); });
     window.__map = map;
     if (NAV) NAV.stop(true);
-    NAV = window.BoranNav ? window.BoranNav.create({ map, t, isNight, lang: () => S.lang, onStart: navStart, onExit: navExit }) : null;
+    NAV = window.BoranNav ? window.BoranNav.create({ map, t, isNight, lang: () => S.lang, onStart: navStart, onExit: navExit, roadsNear }) : null;
     requestAnimationFrame(frame);
     if (!S.city.demo) {
       try {

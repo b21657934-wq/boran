@@ -1,3 +1,4 @@
+import math
 from . import astar, bayes, config, hmm, mdp, nav, search
 from .geo import haversine
 
@@ -35,9 +36,33 @@ def _road_node(city, lon, lat, fallback, r=160.0):
     return fallback
 
 
+def _with_flow(ed, u):
+    ow = ed.get("ow", 0)
+    return not ow or (ow == 1 and ed["u"] == u) or (ow == -1 and ed["v"] == u)
+
+
+def _stop_side(city, line, stop, at_end):
+    pts = [city.proj.xy(p[0], p[1]) for p in (line[::-1] if at_end else line)]
+    if len(pts) < 2:
+        return 0.0
+    x0, y0 = pts[0]
+    acc, far = 0.0, pts[1]
+    for i in range(1, len(pts)):
+        acc += math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1])
+        far = pts[i]
+        if acc > 25:
+            break
+    dx, dy = far[0] - x0, far[1] - y0
+    if at_end:
+        dx, dy = -dx, -dy
+    sx, sy = city.proj.xy(stop["lon"], stop["lat"])
+    d = math.hypot(dx, dy) or 1.0
+    return ((sx - x0) * dy - (sy - y0) * dx) / d
+
+
 def _bus_path(city, an, a, b):
-    for allowed in (lambda ed: ed["hw"] in ROADS, None):
-        res = astar.search(city, a, b, an["risks"], an["wind_k"], safe=False, allow=allowed, weight=lambda ed: ROAD_W.get(ed["hw"], 3.0))
+    for allowed, flow in ((lambda ed: ed["hw"] in ROADS, _with_flow), (lambda ed: ed["hw"] in ROADS, None), (None, None)):
+        res = astar.search(city, a, b, an["risks"], an["wind_k"], safe=False, allow=allowed, weight=lambda ed: ROAD_W.get(ed["hw"], 3.0), allow_dir=flow)
         if res is not None:
             line = astar.describe(city, res, an["risks"], an["wind_k"])
             return line["line"], line["length"], nav.leg(city, res)["segs"]
@@ -77,7 +102,7 @@ def route(city, an, weather, src, dst):
         return None
     transit = None
     if direct > config.TRANSIT_THRESHOLD_M and city.stops:
-        best = None
+        cands = []
         on_road = lambda sid: _road_node(city, city.stops[sid]["lon"], city.stops[sid]["lat"], None, 90.0) is not None
         for sa in [i for i in city.stops_near(*src, k=8) if on_road(i)][:4]:
             na = city.nearest_node(city.stops[sa]["lon"], city.stops[sa]["lat"])
@@ -91,11 +116,22 @@ def route(city, an, weather, src, dst):
                 rb, db = _leg(city, nb, b, an, True)
                 if db is None:
                     continue
-                score = ra["cost"] + rb["cost"]
-                if best is None or score < best[0]:
-                    best = (score, sa, sb, ra, da, rb, db, na, nb)
+                cands.append((ra["cost"] + rb["cost"], sa, sb, ra, da, rb, db, na, nb))
+        cands.sort(key=lambda c: c[0])
+        best = None
+        for cand in cands[:8]:
+            _, sa, sb, ra, da, rb, db, na, nb = cand
+            A0, B0 = city.stops[sa], city.stops[sb]
+            line, m, sg = _bus_path(city, an, _road_node(city, A0["lon"], A0["lat"], na), _road_node(city, B0["lon"], B0["lat"], nb))
+            if line is None:
+                continue
+            if _stop_side(city, line, A0, False) <= 1.5 and _stop_side(city, line, B0, True) <= 1.5:
+                best = cand + (line, m, sg)
+                break
+            if best is None:
+                best = cand + (line, m, sg)
         if best:
-            _, sa, sb, ra, da, rb, db, na, nb = best
+            _, sa, sb, ra, da, rb, db, na, nb, ride_line, ride_m, ride_segs = best
             A, B = city.stops[sa], city.stops[sb]
 
             def named(stop, near):
@@ -106,7 +142,6 @@ def route(city, an, weather, src, dst):
                 return dict(stop, name=street)
 
             A, B = named(A, na), named(B, nb)
-            ride_line, ride_m, ride_segs = _bus_path(city, an, _road_node(city, A["lon"], A["lat"], na), _road_node(city, B["lon"], B["lat"], nb))
             if ride_line is None:
                 ride_line = [[A["lon"], A["lat"]], [B["lon"], B["lat"]]]
                 ride_m = haversine(A["lon"], A["lat"], B["lon"], B["lat"]) * 1.3
@@ -126,7 +161,8 @@ def route(city, an, weather, src, dst):
                 "total_min": round(walk["minutes"] + ride_min + config.TRANSIT_WAIT_MIN, 1),
                 "wave": _wave(city, ra) + _wave(city, rb),
                 "nav": {"legs": [nav.leg(city, ra), nav.leg(city, rb)], "ride_stops": nav.ride_stops(city, ride_line, A, B),
-                        "ride_segs": [[sg[0], sg[1]] for sg in ride_segs], "ride_len": round(ride_m or 0, 1)},
+                        "ride_segs": [[sg[0], sg[1], sg[3] if len(sg) > 3 else 0] for sg in ride_segs], "ride_len": round(ride_m or 0, 1),
+                        "side": [round(_stop_side(city, ride_line, A, False), 1), round(_stop_side(city, ride_line, B, True), 1)]},
                 "expanded": da["expanded"] + db["expanded"],
             }
     out["mode"] = "transit" if transit else "walk"

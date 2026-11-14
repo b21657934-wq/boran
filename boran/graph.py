@@ -14,8 +14,9 @@ MIRRORS = [
     "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 ]
 WALK = "trunk|primary|secondary|tertiary|residential|living_street|pedestrian|footway|path|unclassified|cycleway|steps|service|track"
-CLEANED = {"primary", "secondary", "tertiary", "pedestrian"}
-BIG = {"primary", "secondary"}
+CLEANED = {"trunk", "primary", "secondary", "tertiary", "pedestrian"}
+BIG = {"trunk", "primary", "secondary"}
+TRAFFIC_HW = {"trunk", "primary", "secondary", "tertiary", "unclassified", "residential"}
 FEATURE_BITS = {"shade": 1, "open": 2, "uncleaned": 4, "stop": 8, "bridge": 16}
 CELL = (0.02, 0.03)
 HEAT_CELL = (0.003, 0.0045)
@@ -190,6 +191,7 @@ def build(raw, demo=False):
         hw = tags.get("highway")
         nid_name = name_id(tags)
         sidewalk = tags.get("footway") == "sidewalk"
+        ow = 1 if tags.get("oneway") in ("yes", "1", "true") or tags.get("junction") in ("roundabout", "circular") else (-1 if tags.get("oneway") == "-1" else 0)
         bridge = tags.get("bridge") not in (None, "no")
         start = 0
         for k in range(1, len(ids)):
@@ -219,6 +221,8 @@ def build(raw, demo=False):
                 is_warm = any(True for _ in wgrid.near(mx, my, 90.0))
                 edge = {"u": u, "v": v, "len": length, "mask": mask, "warm": is_warm, "hw": hw,
                         "p": [[q(g["lon"]), q(g["lat"])] for g in seg]}
+                if ow:
+                    edge["ow"] = ow
                 if nid_name >= 0:
                     edge["n"] = nid_name
                 edges.append(edge)
@@ -366,7 +370,10 @@ class City:
         for ed in d["edges"]:
             mid = ed["p"][len(ed["p"]) // 2]
             key = f"{int((mid[1] - s) // cell[0])}_{int((mid[0] - w) // cell[1])}"
-            tiles.setdefault(key, []).append([ed["p"], ed["mask"] & 31, 1 if ed["hw"] in BIG else 0])
+            row = [ed["p"], ed["mask"] & 31, 1 if ed["hw"] in BIG else 0]
+            if ed["hw"] in TRAFFIC_HW:
+                row += [ed["hw"], ed.get("ow", 0)]
+            tiles.setdefault(key, []).append(row)
         heat = {}
         for ed in d["edges"]:
             mid = ed["p"][len(ed["p"]) // 2]

@@ -3,8 +3,14 @@ import math
 from .geo import Grid
 
 CARS = {"primary": 2, "secondary": 2, "tertiary": 1, "trunk": 3}
-HALF = {"trunk": 11.0, "primary": 9.5, "secondary": 7.5, "tertiary": 6.0, "unclassified": 3.75, "residential": 3.75,
-        "living_street": 3.75, "service": 2.25}
+WIDTH = {"trunk": (21.0, 10.5), "primary": (14.0, 7.0), "secondary": (14.0, 7.0), "tertiary": (7.0, 4.0),
+         "unclassified": (6.0, 3.5), "residential": (6.0, 3.5), "living_street": (6.0, 3.5), "service": (4.5, 3.0)}
+HALF = {k: v[0] / 2 for k, v in WIDTH.items()}
+
+
+def half_width(hw, ow):
+    w = WIDTH.get(hw)
+    return (w[1] if ow else w[0]) / 2 if w else 0.0
 RANK = {"trunk": 4, "primary": 3, "secondary": 2, "tertiary": 1}
 
 
@@ -91,7 +97,8 @@ def _crossing(city, v, e_in, e_out, sg):
     hw = city.edges[a]["hw"] if RANK[city.edges[a]["hw"]] >= RANK[city.edges[b]["hw"]] else city.edges[b]["hw"]
     x, y = _xy(city, city.nodes[v])
     signal = (v in sg.nodes or sg.near(x, y)) if sg.known else hw in ("trunk", "primary", "secondary")
-    return {"at": city.nodes[v], "road": round(_bearing(*road), 1), "hw": hw, "lanes": CARS[hw], "half": HALF[hw],
+    ow = bool(city.edges[a].get("ow")) and bool(city.edges[b].get("ow"))
+    return {"at": city.nodes[v], "road": round(_bearing(*road), 1), "hw": hw, "lanes": CARS[hw], "half": half_width(hw, ow), "ow": ow,
             "sig": bool(signal), "zebra": v in sg.zebra, "name": _name(city, city.edges[a]) or _name(city, city.edges[b])}
 
 
@@ -117,7 +124,7 @@ def leg(city, res):
     for k, ei in enumerate(edges):
         ed = city.edges[ei]
         nxt = ed["v"] if ed["u"] == cur else ed["u"]
-        segs.append([round(dist, 1), ed["hw"], _name(city, ed)])
+        segs.append([round(dist, 1), ed["hw"], _name(city, ed), 1 if ed.get("ow") else 0])
         dist += ed["len"]
         if k < len(edges) - 1:
             e2 = edges[k + 1]
@@ -151,9 +158,10 @@ def _merge_divided(cross):
             diff = abs((c["road"] - p["road"] + 540.0) % 360.0 - 180.0)
             if gap < 40 and (diff < 25 or diff > 155) and p["median"] == 0.0:
                 lanes = max(p["lanes"], c["lanes"])
-                median = max(1.0, gap / 2.0 - 3.5 * lanes / 2.0)
+                one = max(p["half"], c["half"])
+                median = max(0.6, gap / 2.0 - one)
                 out[-1] = dict(p, d=round((p["d"] + c["d"]) / 2.0, 1), median=round(median, 1), lanes=lanes,
-                               half=round(median + 3.5 * lanes + 0.6, 1), sig=p["sig"] or c["sig"],
+                               half=round(median + 2 * one, 1), sig=p["sig"] or c["sig"],
                                at=[round((p["at"][0] + c["at"][0]) / 2, 6), round((p["at"][1] + c["at"][1]) / 2, 6)],
                                name=p["name"] or c["name"])
                 continue

@@ -11,7 +11,7 @@ def edge_cost(ed, risk, wind_k, alpha=config.ALPHA_RISK, beta=config.BETA_WIND):
     return ed["len"] * (1.0 + penalty)
 
 
-def search(city, start, goal, risks, wind_k, safe=True, allow=None, weight=None):
+def search(city, start, goal, risks, wind_k, safe=True, allow=None, weight=None, allow_dir=None):
     nodes = city.nodes
     glon, glat = nodes[goal]
     h = lambda n: haversine(nodes[n][0], nodes[n][1], glon, glat)
@@ -34,6 +34,8 @@ def search(city, start, goal, risks, wind_k, safe=True, allow=None, weight=None)
                 continue
             ed = city.edges[ei]
             if allow is not None and not allow(ed):
+                continue
+            if allow_dir is not None and not allow_dir(ed, u):
                 continue
             c = edge_cost(ed, risks[ei], wind_k) if safe else ed["len"] * (weight(ed) if weight else 1.0)
             ng = g[u] + c
