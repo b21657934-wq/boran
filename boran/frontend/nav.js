@@ -143,7 +143,9 @@
       return wcum[lo] + (wcum[lo + 1] - wcum[lo]) * f;
     };
     const at = (d) => toWalk(pre + d * scale);
-    return { base, path, scale, pre, toWalk, at, hwAt };
+    const nameAt = (s) => { const d = (s - pre) / scale; for (let i = segs.length - 1; i >= 0; i--) if (segs[i][0] <= d + 0.01) { for (let j = i; j >= 0; j--) if (segs[j][2]) return segs[j][2]; return ''; } return ''; };
+    const fromWalk = (sw) => { let lo = 0, hi = m - 1; if (sw <= 0) return 0; if (sw >= wcum[m - 1]) return base.len; while (hi - lo > 1) { const md = (lo + hi) >> 1; if (wcum[md] <= sw) lo = md; else hi = md; } const L = wcum[lo + 1] - wcum[lo], f = L > 0 ? (sw - wcum[lo]) / L : 0; return KC[lo] + (KC[lo + 1] - KC[lo]) * f; };
+    return { base, path, scale, pre, toWalk, at, hwAt, nameAt, fromWalk };
   }
 
   class Lane {
@@ -209,7 +211,10 @@
       const W = (m) => ['interpolate', ['exponential', 2], ['zoom'], 14, m * 0.2, 22, m * 51];
       map.addLayer({ id: 'n-flat', type: 'fill', source: 'n-flat', paint: { 'fill-color': ['get', 'c'], 'fill-opacity': ['get', 'o'] } }, before);
       map.addLayer({ id: 'n-walk', type: 'line', source: 'n-walk', filter: ['==', ['get', 'k'], 'side'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': night() ? '#1F2A3D' : '#DCE3EA', 'line-width': W(2.8) } }, before);
-      map.addLayer({ id: 'n-guide', type: 'line', source: 'n-walk', filter: ['==', ['get', 'k'], 'guide'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': night() ? '#7FE7F5' : '#0B9AB5', 'line-opacity': 0.9, 'line-width': W(0.7) } }, before);
+      const GW = (k) => ['interpolate', ['exponential', 2], ['zoom'], 14, 3 * k, 17, 6 * k, 19, 10 * k, 21, 18 * k, 23, 60 * k];
+      map.addLayer({ id: 'n-guide-case', type: 'line', source: 'n-walk', filter: ['==', ['get', 'k'], 'guide'], layout: { 'line-cap': 'round', 'line-join': 'round', visibility: run && run.view === 'fp' ? 'none' : 'visible' }, paint: { 'line-color': night() ? '#0B1220' : '#FFFFFF', 'line-width': GW(1.7) } }, before);
+      map.addLayer({ id: 'n-guide', type: 'line', source: 'n-walk', filter: ['==', ['get', 'k'], 'guide'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': night() ? '#7FE7F5' : '#0B9AB5', 'line-opacity': 0.95, 'line-width': run && run.view === 'fp' ? W(0.7) : GW(1) } }, before);
+      map.addLayer({ id: 'n-done', type: 'line', source: 'n-walk', filter: ['==', ['get', 'k'], 'done'], layout: { 'line-cap': 'round', 'line-join': 'round', visibility: run && run.view === 'fp' ? 'none' : 'visible' }, paint: { 'line-color': night() ? '#5B6B86' : '#9AA7B6', 'line-opacity': 0.8, 'line-width': GW(0.7) } }, before);
       map.addLayer({ id: 'n-static', type: 'fill-extrusion', source: 'n-static', paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-vertical-gradient': false } });
       map.addLayer({ id: 'n-glass', type: 'fill-extrusion', source: 'n-glass', paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-opacity': 0.42 } });
       map.addLayer({ id: 'n-dyn', type: 'fill-extrusion', source: 'n-dyn', paint: { 'fill-extrusion-color': ['get', 'c'], 'fill-extrusion-base': ['get', 'b'], 'fill-extrusion-height': ['get', 'h'], 'fill-extrusion-vertical-gradient': false } });
@@ -218,7 +223,7 @@
       if (run) { run.staticDirty = true; run.flatDirty = true; run.walkDirty = true; }
     }
     function removeLayers() {
-      ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-guide', 'n-walk', 'n-flat'].forEach((id) => { if (map.getLayer(id)) map.removeLayer(id); });
+      ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-done', 'n-guide', 'n-guide-case', 'n-walk', 'n-flat'].forEach((id) => { if (map.getLayer(id)) map.removeLayer(id); });
       ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-walk', 'n-flat'].forEach((id) => { if (map.getSource(id)) map.removeSource(id); });
     }
     const FC = (f) => ({ type: 'FeatureCollection', features: f });
@@ -471,13 +476,16 @@
         gaps.forEach(([u, v]) => { piece(a, Math.max(a, u)); a = Math.max(a, v); });
         piece(a, ph.walk.path.len);
       });
-      const ph = run.plan.phases[run.i];
-      if (ph && ph.type === 'walk') {
-        const a = run.s, b = Math.min(ph.walk.path.len, run.s + 260), pts = [];
-        for (let s = a; s <= b; s += 3) pts.push(F.ll(ph.walk.path.pos(s)));
-        pts.push(F.ll(ph.walk.path.pos(b)));
-        if (pts.length > 1) out.push({ type: 'Feature', properties: { k: 'guide' }, geometry: { type: 'LineString', coordinates: pts } });
-      }
+      const line = (k, P, a, b, step) => { if (b - a < 0.5) return; const pts = []; for (let s = a; s < b; s += step) pts.push(F.ll(P.pos(s))); pts.push(F.ll(P.pos(b))); out.push({ type: 'Feature', properties: { k }, geometry: { type: 'LineString', coordinates: pts } }); };
+      const fp = run.view === 'fp';
+      run.plan.phases.forEach((ph, i) => {
+        if (ph.type !== 'walk') return;
+        const P = ph.walk.path;
+        if (i < run.i) { if (!fp) line('done', P, 0, P.len, 4); return; }
+        if (i > run.i) { if (!fp) line('guide', P, 0, P.len, 4); return; }
+        if (!fp) line('done', P, 0, run.s, 4);
+        line('guide', P, run.s, fp ? Math.min(P.len, run.s + 260) : P.len, fp ? 3 : 4);
+      });
       setData('n-walk', out);
     }
 
@@ -499,7 +507,38 @@
     }
     function cool(lanes) { for (const L of lanes) { L.live = false; L.cars = []; } }
 
+    function navCamera(W) {
+      const ph = run.plan.phases[run.i];
+      let z = 18.2, pitch = 55, ahead = 45;
+      if (ph && ph.type === 'walk') {
+        const X = ph.crossings.find((c) => c.sIn - run.s < 75 && run.s - c.sOut < 25);
+        if (X) { z = 19.25; pitch = 62; ahead = 16; }
+      } else if (ph && (ph.type === 'stop' || ph.type === 'alight')) { z = 19.3; pitch = 60; ahead = 12; }
+      else if (ph && ph.type === 'ride') { z = 17.5; pitch = 56; ahead = 110; }
+      const H = map.getCanvas().clientHeight || 800;
+      if (H < 640) z -= 0.35;
+      const k = run.camInit ? Math.min(1, (run.dtR || 0.03) * 1.6) : 1;
+      run.camInit = true;
+      run.nz = run.nz == null ? z : run.nz + (z - run.nz) * k;
+      run.np = run.np == null ? pitch : run.np + (pitch - run.np) * k;
+      run.na = run.na == null ? ahead : run.na + (ahead - run.na) * k;
+      const tr = run.tr == null ? 0 : run.tr;
+      run.nb = run.nb == null ? tr : run.nb + angDiff(run.nb, tr) * Math.min(1, (run.dtR || 0.03) * 2.2);
+      const f = [Math.sin(run.nb * RAD), Math.cos(run.nb * RAD)];
+      map.jumpTo({ center: run.F.ll([W[0] + f[0] * run.na, W[1] + f[1] * run.na]), zoom: run.nz, pitch: run.np, bearing: run.nb });
+    }
+    function placeMe(W, hd, show) {
+      if (!run.me) return;
+      run.me.getElement().style.display = show ? '' : 'none';
+      if (!show) return;
+      run.me.setLngLat(run.F.ll(W));
+      run.me.setRotation(hd);
+    }
     function camera(W, hd, A, theta, back) {
+      const ph = run.plan.phases[run.i];
+      const meW = run.meW || W;
+      placeMe(meW, run.tr == null ? hd : run.tr, run.view !== 'fp' && !(ph && ph.type === 'ride'));
+      if (run.view !== 'fp') { navCamera(ph && ph.type === 'ride' ? W : meW); return; }
       const f = [Math.sin(hd * RAD), Math.cos(hd * RAD)];
       const Dh = A * Math.tan(theta * RAD), d = A / Math.cos(theta * RAD);
       const cam = [W[0] - f[0] * back, W[1] - f[1] * back];
@@ -658,6 +697,9 @@
         const a = ph.walk.path.pos(run.s), b = ph.walk.path.pos(Math.min(ph.walk.path.len + 6, run.s + 14));
         hd = headingOf(unit(b[0] - a[0], b[1] - a[1]));
       }
+      { const a = ph.walk.path.pos(run.s), b = ph.walk.path.pos(Math.min(ph.walk.path.len + 6, run.s + 22)); if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 1) run.tr = headingOf(unit(b[0] - a[0], b[1] - a[1])); }
+      run.meW = W;
+      run.street = ph.walk.nameAt(ph.walk.fromWalk(run.s));
       run.hd = run.hd == null ? hd : run.hd + angDiff(run.hd, hd) * Math.min(1, dtW * (hold ? 2.2 : 3.2));
       if (!hold) run.stepPh = (run.stepPh || 0) + (WALK * BASE * dtw / 0.75) * Math.PI;
       run.cam = { W, hd: run.hd, A: 2.3 + (hold ? 0 : Math.abs(Math.sin(run.stepPh || 0)) * 0.05), th: 79, back: 0.6 };
@@ -702,6 +744,7 @@
       else { const bp = ph.path.pos(bus.s - 6); hd = headingOf(unit(bp[0] - st.spot[0], bp[1] - st.spot[1])); }
       run.hd = run.hd == null ? hd : run.hd + angDiff(run.hd, hd) * Math.min(1, dtW * 2);
       run.cam = { W, hd: run.hd, A: 2.2, th: 79, back: 0.4 };
+      run.meW = W; run.tr = st.h; run.street = st.name;
       return false;
     }
 
@@ -728,7 +771,8 @@
       const k = Math.min(1, bus.rideT / 1.6);
       const from = run.fromCam || { W, A: 3.2, th: 80, back: 0 };
       run.cam = { W: [from.W[0] + (W[0] - from.W[0]) * k, from.W[1] + (W[1] - from.W[1]) * k], hd: run.hd, A: from.A + (3.2 - from.A) * k, th: from.th + (80 - from.th) * k, back: from.back * (1 - k) };
-      hud().frame.hidden = k < 0.6;
+      run.meW = W; run.tr = run.hd; run.street = nextStop ? nextStop.name : '';
+      hud().frame.hidden = run.view !== 'fp' || k < 0.6;
       return end - bus.s < 0.05;
     }
 
@@ -740,6 +784,7 @@
       setHud(T('n_get_off', { name: st.name || '' }), '', 'stop');
       const from = run.fromCam;
       run.cam = { W: [from.W[0] + (st.spot[0] - from.W[0]) * k, from.W[1] + (st.spot[1] - from.W[1]) * k], hd: run.hd, A: from.A + (2.3 - from.A) * k, th: from.th + (79 - from.th) * k, back: 0.6 * k };
+      run.meW = run.cam.W; run.tr = st.h; run.street = st.name;
       if (run.alT > 1.2) bus.state = 'leave';
       return run.alT > 2.6;
     }
@@ -777,7 +822,7 @@
       if (!run) return;
       run.raf = requestAnimationFrame(tick);
       const dtR = Math.min(0.1, (now - (run.last || now)) / 1000);
-      run.last = now;
+      run.last = now; run.dtR = dtR;
       if (run.paused) { if (run.cam) camera(run.cam.W, run.cam.hd, run.cam.A, run.cam.th, run.cam.back); return; }
       const dtw = dtR * run.speed;
       const dtW = dtR * Math.min(run.speed, 2.5);
@@ -808,7 +853,7 @@
       if (run) {
         dynamic();
         run.uiT = (run.uiT || 0) + dtR;
-        if (run.uiT > 0.25) { run.uiT = 0; hud().bar.style.width = (progress() * 100).toFixed(1) + '%'; hud().eta.textContent = strings()('n_left', { min: remainingMin() }); }
+        if (run.uiT > 0.25) { run.uiT = 0; hud().bar.style.width = (progress() * 100).toFixed(1) + '%'; hud().eta.textContent = strings()('n_left', { min: remainingMin() }); miniUpdate(); }
       }
     }
 
@@ -845,13 +890,16 @@
       root.innerHTML = '<div class="nav-top glass"><div class="nav-ico"></div><div class="nav-txt"><b></b><small></small></div></div>' +
         '<div class="nav-sig" hidden><i></i><span></span></div>' +
         '<div class="nav-frame" hidden><i class="l"></i><i class="r"></i><i class="t"></i><i class="b"></i></div>' +
+        '<div class="nav-mini glass"><svg viewBox="0 0 200 200"></svg></div><div class="nav-street" hidden></div>' +
         '<div class="nav-bar glass"><button class="nav-play" aria-label="pause"></button><div class="nav-prog"><i></i></div><span class="nav-eta"></span>' +
+        '<div class="nav-view" role="group" aria-label="' + T('n_view') + '"><button data-v="nav">' + T('n_view_nav') + '</button><button data-v="fp">' + T('n_view_fp') + '</button></div>' +
         '<div class="nav-speed" role="group" aria-label="' + T('n_speed') + '">' + [1, 2, 3, 4, 5].map((k) => '<button data-k="' + k + '">' + k + '×</button>').join('') + '</div>' +
         '<button class="nav-x" aria-label="' + T('n_exit') + '"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>' +
         '<div class="nav-fin glass" hidden><h3>' + T('n_arrive') + '</h3><p></p><div><button class="cta nav-again">' + T('n_again') + '</button><button class="btn2 nav-close">' + T('n_close') + '</button></div></div>';
       document.body.appendChild(root);
       const q = (s) => root.querySelector(s);
-      const h = { root, icon: q('.nav-ico'), main: q('.nav-txt b'), sub: q('.nav-txt small'), sig: q('.nav-sig'), frame: q('.nav-frame'), bar: q('.nav-prog i'), eta: q('.nav-eta'), fin: q('.nav-fin'), play: q('.nav-play'), speed: q('.nav-speed') };
+      const h = { root, icon: q('.nav-ico'), main: q('.nav-txt b'), sub: q('.nav-txt small'), sig: q('.nav-sig'), frame: q('.nav-frame'), bar: q('.nav-prog i'), eta: q('.nav-eta'), fin: q('.nav-fin'), play: q('.nav-play'), speed: q('.nav-speed'), mini: q('.nav-mini svg'), street: q('.nav-street'), view: q('.nav-view') };
+      h.view.querySelectorAll('button').forEach((b) => { b.onclick = () => api.setView(b.dataset.v); });
       const playIcon = () => { h.play.innerHTML = run && run.paused ? '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg>' : '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></svg>'; };
       playIcon();
       h.play.onclick = () => { if (!run) return; run.paused = !run.paused; playIcon(); };
@@ -861,6 +909,49 @@
       q('.nav-again').onclick = () => { const r = run.plan.route; api.stop(true); api.start(r); };
       q('.nav-prog').onclick = (ev) => { if (!run || run.done) return; const box = ev.currentTarget.getBoundingClientRect(); seek((ev.clientX - box.left) / box.width); };
       return h;
+    }
+
+    function miniBuild() {
+      const svg = run.hud.mini, F = run.F, polys = [];
+      run.plan.phases.forEach((ph) => {
+        if (ph.type === 'walk') polys.push(['w', ph.walk.path]);
+        else if (ph.type === 'ride') polys.push(['r', ph.path, ph.start, ph.end]);
+      });
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      const samp = polys.map(([k, P, a = 0, b = P.len]) => { const pts = []; for (let s = a; s <= b; s += Math.max(4, (b - a) / 160)) pts.push(P.pos(s)); pts.push(P.pos(b)); pts.forEach(([x, y]) => { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }); return [k, pts]; });
+      const span = Math.max(x1 - x0, y1 - y0, 60), sc = 168 / span, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+      run.mini = (p) => [100 + (p[0] - cx) * sc, 100 - (p[1] - cy) * sc];
+      const path = (pts) => pts.map((p, i) => (i ? 'L' : 'M') + run.mini(p).map((v) => v.toFixed(1)).join(' ')).join('');
+      const first = samp[0][1][0], last = samp[samp.length - 1][1].slice(-1)[0];
+      const [ax, ay] = run.mini(first), [bx, by] = run.mini(last);
+      const sigs = [];
+      run.plan.phases.forEach((ph) => { if (ph.type === 'walk') ph.crossings.forEach((X) => { if (X.sig) { const q = run.mini(ph.walk.path.pos((X.sIn + X.sOut) / 2)); sigs.push('<circle cx="' + q[0].toFixed(1) + '" cy="' + q[1].toFixed(1) + '" r="3.2" class="m-sig"/>'); } }); });
+      svg.innerHTML = samp.map(([k, pts]) => '<path d="' + path(pts) + '" class="m-' + k + '"/>').join('') + sigs.join('') +
+        '<circle cx="' + ax.toFixed(1) + '" cy="' + ay.toFixed(1) + '" r="5" class="m-a"/><rect x="' + (bx - 5).toFixed(1) + '" y="' + (by - 5).toFixed(1) + '" width="10" height="10" rx="2" class="m-b"/>' +
+        '<g class="m-me"><circle r="7"/><path d="M0 -5 L4 4 L0 2 L-4 4 Z"/></g>';
+      run.miniMe = svg.querySelector('.m-me');
+    }
+    function miniUpdate() {
+      if (!run.mini || !run.miniMe) return;
+      const W = run.meW || (run.cam && run.cam.W);
+      if (!W) return;
+      const [x, y] = run.mini(W);
+      run.miniMe.setAttribute('transform', 'translate(' + x.toFixed(1) + ' ' + y.toFixed(1) + ') rotate(' + ((run.tr || 0)).toFixed(0) + ')');
+      const st = run.street || '';
+      if (run.hud.street.textContent !== st) run.hud.street.textContent = st;
+      run.hud.street.hidden = !st;
+    }
+    function applyView() {
+      const fp = run.view === 'fp';
+      document.body.classList.toggle('navfp', fp);
+      run.hud.view.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.v === run.view));
+      const st = map.getStyle();
+      if (st) st.layers.forEach((L) => { if (/^highway-name|^road_one_way|^poi_|^b-risk/.test(L.id)) map.setLayoutProperty(L.id, 'visibility', fp ? 'none' : 'visible'); });
+      ['n-guide-case', 'n-done'].forEach((id) => { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', fp ? 'none' : 'visible'); });
+      if (map.getLayer('n-guide')) map.setPaintProperty('n-guide', 'line-width', fp ? ['interpolate', ['exponential', 2], ['zoom'], 14, 0.14, 22, 35.7] : ['interpolate', ['exponential', 2], ['zoom'], 14, 3, 17, 6, 19, 10, 21, 18, 23, 60]);
+      if (!fp) run.hud.frame.hidden = true;
+      run.nz = null; run.np = null; run.na = null; run.nb = null; run.camInit = false;
+      run.walkDirty = true;
     }
 
     function seek(frac) {
@@ -894,15 +985,22 @@
         const p = plan(route);
         run = { plan: p, F: p.F, rnd: p.rnd, i: 0, s: 0, wt: 0, speed: api.speed || 2, lanes: [], bus: { on: false, s: 0, v: 0 }, staticDirty: true, walkDirty: true, hd: null };
         run.hud = buildHud();
+        run.view = api.view || 'nav';
         api.setSpeed(run.speed);
+        const meEl = document.createElement('div');
+        meEl.className = 'nav-me';
+        meEl.innerHTML = '<svg viewBox="0 0 48 48"><circle cx="24" cy="24" r="21" class="h"/><circle cx="24" cy="24" r="15" class="b"/><path d="M24 12 L32 32 L24 27 L16 32 Z" class="a"/></svg>';
+        run.me = new window.maplibregl.Marker({ element: meEl, rotationAlignment: 'map', pitchAlignment: 'map' }).setLngLat(map.getCenter()).addTo(map);
         run.saved = { maxPitch: map.getMaxPitch(), maxZoom: map.getMaxZoom() };
         map.setMaxPitch(85); map.setMaxZoom(23.5);
         ['dragPan', 'dragRotate', 'scrollZoom', 'touchZoomRotate', 'doubleClickZoom', 'keyboard', 'boxZoom'].forEach((k) => { try { map[k].disable(); } catch (e) { } });
         addLayers();
-        run.onStyle = () => { if (run && !map.getSource('n-flat')) setTimeout(() => { if (run) addLayers(); }, 0); };
+        run.onStyle = () => { if (run && !map.getSource('n-flat')) setTimeout(() => { if (run) { addLayers(); applyView(); } }, 0); };
         map.on('styledata', run.onStyle);
         document.body.classList.add('navmode');
         if (ctx.onStart) ctx.onStart();
+        miniBuild();
+        applyView();
         run.raf = requestAnimationFrame(tick);
       },
       stop(silent) {
@@ -910,6 +1008,10 @@
         cancelAnimationFrame(run.raf);
         map.off('styledata', run.onStyle);
         run.hud.root.remove();
+        if (run.me) run.me.remove();
+        document.body.classList.remove('navfp');
+        const st = map.getStyle();
+        if (st) st.layers.forEach((L) => { if (/^highway-name|^road_one_way|^poi_/.test(L.id)) map.setLayoutProperty(L.id, 'visibility', 'visible'); });
         removeLayers();
         ['dragPan', 'dragRotate', 'scrollZoom', 'touchZoomRotate', 'doubleClickZoom', 'keyboard', 'boxZoom'].forEach((k) => { try { map[k].enable(); } catch (e) { } });
         map.setMaxZoom(run.saved.maxZoom);
@@ -918,6 +1020,12 @@
         run = null;
         document.body.classList.remove('navmode');
         if (!silent && ctx.onExit) ctx.onExit();
+      },
+      setView(v) {
+        api.view = v;
+        if (!run) return;
+        run.view = v;
+        applyView();
       },
       setSpeed(k) {
         api.speed = k;
