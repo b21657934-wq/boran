@@ -32,6 +32,7 @@
   <nav id="tools">
     <button class="tool glass" id="btn-brain" aria-haspopup="dialog"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 0V7a3 3 0 0 0-3-3zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 0"/></svg><span id="t-brain"></span></button>
     <button class="tool glass" id="btn-scn" aria-haspopup="menu"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg><span id="t-scn"></span></button>
+    <button class="tool glass" id="btn-night" aria-pressed="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 15h11v-4h3l3 3v3h-2M3 15v2h2"/><circle cx="7.5" cy="17.5" r="1.8"/><circle cx="16.5" cy="17.5" r="1.8"/><path d="M15 3.5a3.5 3.5 0 1 0 4.5 4.5 3 3 0 0 1-4.5-4.5z"/></svg><span id="t-night"></span></button>
     <button class="tool glass" id="btn-ice" aria-pressed="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.2 7-11.5A7 7 0 0 0 5 9.500C5 14.800 12 21 12 21z"/><path d="M12 6.500v6M9.400 8l5.200 3M14.600 8l-5.200 3"/></svg><span id="t-ice"></span><b class="tool-n" id="ice-n" hidden></b></button>
     <button class="tool glass icon" id="btn-theme"><svg viewBox="0 0 24 24" width="20" height="20"><path d="M20 14.500A8 8 0 1 1 9.500 4a6.500 6.500 0 0 0 10.500 10.500z" fill="currentColor"/></svg></button>
     <button class="tool glass icon" id="btn-lang">RU</button>
@@ -70,6 +71,7 @@
 <div id="brief" role="dialog" aria-modal="true" hidden></div>
 <div id="share" class="glass" role="dialog" hidden></div>
 
+<aside id="night" class="glass" role="dialog" aria-label="night" hidden></aside>
 <aside id="brain" class="glass" role="dialog" aria-label="AI" hidden>
   <div class="brain-head"><h3 id="t-brain-title"></h3><button class="x" id="brain-x" aria-label="close"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
   <div id="brain-body"></div>
@@ -100,6 +102,7 @@
 <script src="vendor/maplibre-gl.js"></script>
 <script src="i18n.js"></script>
 <script src="nav.js"></script>
+<script src="nightmode.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

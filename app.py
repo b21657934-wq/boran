@@ -9,6 +9,7 @@ import streamlit.components.v1 as components
 
 import importlib
 import glob
+import gzip
 
 import boran
 from boran import config, graph, pipeline, reports, weather
@@ -103,6 +104,19 @@ def analyse(name, stamp, signature):
 
 
 @st.cache_resource(show_spinner=False, max_entries=2)
+def night_file(signature):
+    src = os.path.join(os.path.dirname(graph.data_path()), "night.json.gz")
+    try:
+        with gzip.open(src, "rb") as f:
+            blob = f.read()
+        with open(os.path.join(FRONTEND, "night.json"), "wb") as f:
+            f.write(blob)
+        return str(int(os.path.getmtime(src)))
+    except OSError:
+        return None
+
+
+@st.cache_resource(show_spinner=False, max_entries=2)
 def report_store(signature):
     c = load_city(signature)[0]
     pts = [(s["lon"], s["lat"]) for s in c.stops] + [(p["lon"], p["lat"]) for p in config.PLACES]
@@ -193,6 +207,7 @@ payload = {
     "compare": compare,
     "ack": state.get("n", 0),
     "reportsV": store.version,
+    "nightV": night_file(sig),
     "reportsInline": reports_inline,
     "cityVersion": version,
     "city": inline_city,

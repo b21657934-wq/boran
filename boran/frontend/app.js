@@ -58,7 +58,7 @@
       S.riskTable = args.riskTable;
       await initMap();
     }
-    if (String(S.riskTable) !== String(args.riskTable)) { S.riskTable = args.riskTable; pushRisk(); }
+    if (!S.nightRisk && String(S.riskTable) !== String(args.riskTable)) { S.riskTable = args.riskTable; pushRisk(); }
     themeBody();
     renderAll();
     const key = args.route ? JSON.stringify([args.route.src, args.route.dst, args.scenario]) : null;
@@ -513,7 +513,7 @@
     S.styleTry = (S.styleTry || 0) + 1;
     const attempt = S.styleTry;
     map.setStyle(full, { diff: false });
-    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; S.tileShown = ''; refreshTiles(); loadHeat(); pushRoute(true); pushReports(); pushCompare(); });
+    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; S.tileShown = ''; refreshTiles(); loadHeat(); pushRoute(true); pushReports(); pushCompare(); if (NIGHT) NIGHT.restyle(); });
     setTimeout(() => {
       if (attempt !== S.styleTry || (map.getStyle() && map.getLayer('b-risk'))) return;
       if (attempt > 3) return;
@@ -542,6 +542,10 @@
     window.__map = map;
     if (NAV) NAV.stop(true);
     NAV = window.BoranNav ? window.BoranNav.create({ map, t, isNight, lang: () => S.lang, onStart: navStart, onExit: navExit, roadsNear, onShare: () => openShare('arrived') }) : null;
+    if (!NIGHT && window.BoranNight) NIGHT = window.BoranNight.create({ map: () => map, t, version: () => S.args && S.args.nightV,
+      setRisk: (tb) => { S.nightRisk = tb; S.riskTable = tb || (S.args && S.args.riskTable); pushRisk(); },
+      onOpen: () => { $('brain').hidden = true; $('marks').hidden = true; closeAlgos(); $('panel').classList.add('min'); $('btn-night').setAttribute('aria-pressed', 'true'); },
+      onClose: () => { $('btn-night').setAttribute('aria-pressed', 'false'); } });
     requestAnimationFrame(frame);
     if (!S.city.demo) {
       try {
@@ -778,7 +782,7 @@
     renderWho();
     const a = S.args, wx = a.weather, now = wx.now;
     document.documentElement.lang = S.lang === 'kk' ? 'kk' : S.lang;
-    $('t-brain').textContent = t('brain'); $('t-scn').textContent = t('scn'); $('t-ice').textContent = t('r_btn'); $('t-from').textContent = t('from'); $('t-to').textContent = t('to');
+    $('t-brain').textContent = t('brain'); $('t-scn').textContent = t('scn'); $('t-ice').textContent = t('r_btn'); $('t-night').textContent = t('nt_btn'); $('t-from').textContent = t('from'); $('t-to').textContent = t('to');
     $('t-build').textContent = t('build'); $('t-walk').textContent = t('walk_btn'); $('t-legend').textContent = t('legend'); $('t-leg-lo').textContent = t('lo'); $('t-leg-hi').textContent = t('hi');
     $('t-brain-title').textContent = t('brain'); $('t-marks-title').textContent = t('m_title'); $('btn-lang').textContent = t('code');
     $('btn-brain').setAttribute('aria-label', t('brain')); $('btn-scn').setAttribute('aria-label', t('scn')); $('btn-ice').setAttribute('aria-label', t('m_title'));
@@ -1160,13 +1164,13 @@
     const btn = $('btn-theme');
     if (btn && btn.dataset.th !== theme()) { btn.dataset.th = theme(); btn.innerHTML = ico[theme()]; btn.title = t('theme_' + theme()); }
   }
-  let NAV = null;
+  let NAV = null, NIGHT = null;
   const NAV_HIDE = /^b-(?!landmarks|heat)|^highway-name|^road_one_way|^poi_/;
   function navLayers(show) {
     if (!map || !map.getStyle()) return;
     map.getStyle().layers.forEach((L) => { if (NAV_HIDE.test(L.id)) map.setLayoutProperty(L.id, 'visibility', show ? 'visible' : 'none'); });
   }
-  function navStart() { closeAlgos(); $('brain').hidden = true; $('marks').hidden = true; navLayers(false); }
+  function navStart() { if (NIGHT) NIGHT.close(); closeAlgos(); $('brain').hidden = true; $('marks').hidden = true; navLayers(false); }
   function navExit() { navLayers(true); const r = S.wantRoute && S.args.route; if (r) fitRoute(r); renderAll(); }
   function startWalk(r) {
     if (!NAV || !r) return;
@@ -1323,10 +1327,11 @@
   $('btn-cmp').onclick = () => openAlgos();
   $('algos-x').onclick = () => closeAlgos();
   $('btn-locate').onclick = () => locate('src');
-  $('btn-brain').onclick = () => { const b = $('brain'); $('marks').hidden = true; closeAlgos(); b.hidden = !b.hidden; if (!b.hidden) renderBrain(); };
+  $('btn-night').onclick = () => { if (!NIGHT) return; if (NIGHT.active()) NIGHT.close(); else NIGHT.open(); };
+  $('btn-brain').onclick = () => { if (NIGHT) NIGHT.close(); const b = $('brain'); $('marks').hidden = true; closeAlgos(); b.hidden = !b.hidden; if (!b.hidden) renderBrain(); };
   $('brain-x').onclick = () => { $('brain').hidden = true; };
   $('marks-x').onclick = () => { $('marks').hidden = true; };
-  $('btn-lang').onclick = () => { S.lang = LANGS[(LANGS.indexOf(S.lang) + 1) % LANGS.length]; store.set('boran.lang', S.lang); renderAll(); };
+  $('btn-lang').onclick = () => { S.lang = LANGS[(LANGS.indexOf(S.lang) + 1) % LANGS.length]; store.set('boran.lang', S.lang); renderAll(); if (NIGHT) NIGHT.relabel(); };
   $('btn-theme').onclick = () => {
     S.themeForce = THEMES[(THEMES.indexOf(theme()) + 1) % THEMES.length];
     store.set('boran.theme', S.themeForce);
@@ -1335,6 +1340,7 @@
     renderAll();
   };
   $('btn-ice').onclick = () => {
+    if (NIGHT && !S.markMode) NIGHT.close();
     S.markMode = !S.markMode; $('btn-ice').setAttribute('aria-pressed', String(S.markMode)); $('mark-pop').hidden = true; document.body.classList.toggle('markmode', S.markMode);
     if (S.markMode) { $('brain').hidden = true; closeAlgos(); $('marks').hidden = false; renderMarks(); toast(t('m_hint')); $('panel').classList.add('min'); } else { $('marks').hidden = true; toast(t('m_off')); }
   };
@@ -1354,6 +1360,6 @@
   };
   $('panel-handle').onclick = () => $('panel').classList.toggle('min');
   $('wx').onclick = () => $('wx').classList.toggle('open');
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { $('brain').hidden = true; closeAlgos(); $('marks').hidden = true; $('scn-menu').hidden = true; $('place-list').hidden = true; S.picking = null; if (S.args) renderAll(); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (NIGHT) NIGHT.close(); $('brain').hidden = true; closeAlgos(); $('marks').hidden = true; $('scn-menu').hidden = true; $('place-list').hidden = true; S.picking = null; if (S.args) renderAll(); } });
   window.__boran = S;
 })();
