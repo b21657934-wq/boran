@@ -85,9 +85,16 @@ def load_city(signature):
         return city, version, dict(meta, inline=tiles)
 
 
-@st.cache_data(ttl=600, show_spinner=False)
-def load_weather(name):
+@st.cache_data(ttl=600, show_spinner=False, max_entries=16)
+def _weather(name, bucket):
     return weather.get(name)
+
+
+def load_weather(name):
+    w = _weather(name, int(time.time() // 600))
+    if w.get("fallback") or w.get("stale"):
+        w = _weather(name, f"retry-{int(time.time() // 120)}")
+    return w
 
 
 @st.cache_data(ttl=600, show_spinner=False, max_entries=8)

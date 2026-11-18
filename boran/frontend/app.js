@@ -474,12 +474,12 @@
         paint: { 'line-color': ['case', ['==', ['get', 'k'], 'dry'], P.ok, P.risk[2]], 'line-blur': 5, 'line-opacity': 0.45, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 6, 17, 22] } },
       { id: 'b-repseg', type: 'line', source: 'b-repseg', layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': ['case', ['==', ['get', 'k'], 'dry'], P.ok, ['interpolate', ['linear'], ['get', 'p'], 0.3, P.risk[1], 0.75, P.risk[2]]], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 17, 7] } },
-      { id: 'b-marks-halo', type: 'circle', source: 'b-marks', filter: ['==', ['get', 'fresh'], 1],
-        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 10, 17, 26], 'circle-color': ['match', ['get', 'k'], 'ice', P.risk[2], 'packed', P.risk[1], P.ok], 'circle-opacity': 0.22, 'circle-pitch-alignment': 'map' } },
+      { id: 'b-marks-halo', type: 'circle', source: 'b-marks',
+        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, 11, 14, 18, 17, 30], 'circle-color': ['match', ['get', 'k'], 'ice', P.risk[2], 'packed', P.risk[1], P.ok], 'circle-opacity': ['case', ['==', ['get', 'fresh'], 1], 0.32, 0.18], 'circle-blur': 0.4, 'circle-pitch-alignment': 'viewport' } },
       { id: 'b-marks', type: 'circle', source: 'b-marks',
-        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, ['+', 3, ['min', ['get', 'n'], 4]], 17, ['+', 8, ['*', 2, ['min', ['get', 'n'], 4]]]],
-          'circle-color': ['match', ['get', 'k'], 'ice', P.risk[2], 'packed', P.risk[1], P.ok], 'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 2, 'circle-pitch-alignment': 'map' } },
-      { id: 'b-marks-label', type: 'symbol', source: 'b-marks', minzoom: 14.5,
+        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, ['+', 5, ['min', ['get', 'n'], 4]], 14, ['+', 7, ['min', ['get', 'n'], 4]], 17, ['+', 10, ['*', 2, ['min', ['get', 'n'], 4]]]],
+          'circle-color': ['match', ['get', 'k'], 'ice', P.risk[2], 'packed', P.risk[1], P.ok], 'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 2.5, 'circle-pitch-alignment': 'viewport' } },
+      { id: 'b-marks-label', type: 'symbol', source: 'b-marks', minzoom: 13.6,
         layout: { 'text-field': ['get', 'lbl'], 'text-font': ['Noto Sans Bold'], 'text-size': 12, 'text-offset': [0, 1.5], 'text-anchor': 'top', 'text-allow-overlap': false },
         paint: { 'text-color': isNight() ? '#EAF2FF' : '#1B2333', 'text-halo-color': isNight() ? 'rgba(8,12,24,.9)' : 'rgba(255,255,255,.95)', 'text-halo-width': 1.6 } },
     ];
@@ -602,6 +602,7 @@
   function applyReports(d) {
     if (!d || typeof d.v !== 'number') return;
     S.reps = d; S.repsAt = Date.now() / 1000; S.repsV = d.v;
+    $('ice-n').textContent = d.reports.length; $('ice-n').hidden = !d.reports.length;
     const seen = new Set(d.reports.map((r) => r[0]));
     S.pendingReps = S.pendingReps.filter((r) => !seen.has(r.id) && Date.now() - r.at < 60000);
     pushReports();
@@ -777,7 +778,7 @@
     renderWho();
     const a = S.args, wx = a.weather, now = wx.now;
     document.documentElement.lang = S.lang === 'kk' ? 'kk' : S.lang;
-    $('t-brain').textContent = t('brain'); $('t-scn').textContent = t('scn'); $('t-from').textContent = t('from'); $('t-to').textContent = t('to');
+    $('t-brain').textContent = t('brain'); $('t-scn').textContent = t('scn'); $('t-ice').textContent = t('r_btn'); $('t-from').textContent = t('from'); $('t-to').textContent = t('to');
     $('t-build').textContent = t('build'); $('t-walk').textContent = t('walk_btn'); $('t-legend').textContent = t('legend'); $('t-leg-lo').textContent = t('lo'); $('t-leg-hi').textContent = t('hi');
     $('t-brain-title').textContent = t('brain'); $('t-marks-title').textContent = t('m_title'); $('btn-lang').textContent = t('code');
     $('btn-brain').setAttribute('aria-label', t('brain')); $('btn-scn').setAttribute('aria-label', t('scn')); $('btn-ice').setAttribute('aria-label', t('m_title'));

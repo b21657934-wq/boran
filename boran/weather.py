@@ -1,10 +1,16 @@
 import datetime as dt
+import json
+import os
+import tempfile
+import time
 
 import requests
 
 from . import config
 
 URL = "https://api.open-meteo.com/v1/forecast"
+LAST = os.path.join(tempfile.gettempdir(), "boran_live_weather.json")
+KEEP_S = 6 * 3600
 PAST, AHEAD = 12, 6
 
 
@@ -20,9 +26,17 @@ def fetch_live():
         "hourly": "temperature_2m,apparent_temperature,precipitation,snowfall,wind_speed_10m,wind_direction_10m,relative_humidity_2m",
         "current": "temperature_2m,apparent_temperature,precipitation,snowfall,wind_speed_10m,wind_direction_10m,relative_humidity_2m,is_day",
     }
-    r = requests.get(URL, params=params, timeout=12)
-    r.raise_for_status()
-    return parse(r.json())
+    err = None
+    for attempt in range(2):
+        try:
+            r = requests.get(URL, params=params, timeout=6, headers={"User-Agent": "boran-astana/1.0 (student project)"})
+            r.raise_for_status()
+            return parse(r.json())
+        except Exception as exc:
+            err = exc
+            if attempt == 0:
+                time.sleep(1.0)
+    raise err
 
 
 def parse(js):
@@ -81,8 +95,21 @@ def get(name="live"):
     if name != "live" and name in SCENARIOS:
         return scenario(name)
     try:
-        return fetch_live()
+        w = fetch_live()
+        try:
+            with open(LAST, "w", encoding="utf-8") as f:
+                json.dump({"at": time.time(), "w": w}, f)
+        except OSError:
+            pass
+        return w
     except Exception:
+        try:
+            with open(LAST, encoding="utf-8") as f:
+                saved = json.load(f)
+            if time.time() - saved["at"] < KEEP_S:
+                return dict(saved["w"], stale=round((time.time() - saved["at"]) / 60))
+        except (OSError, ValueError, KeyError):
+            pass
         w = scenario("thaw_freeze")
         w["fallback"] = True
         return w
