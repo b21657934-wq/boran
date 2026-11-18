@@ -1,5 +1,5 @@
 import math
-from . import astar, bayes, config, hmm, mdp, nav, search
+from . import astar, bayes, config, frost, hmm, mdp, nav, search
 from .geo import haversine
 
 
@@ -307,6 +307,23 @@ def route(city, an, weather, src, dst):
     short_res, short = _leg(city, a, b, an, False)
     if safe is None:
         return None
+    wci, lim, band = frost.limit(weather["now"]["temp"], weather["now"]["wind"])
+    fz = {"wci": wci, "limit": lim, "band": band, "need": False, "ok": True, "stops": [], "pen": 0.0}
+    if lim is not None:
+        lim_m = lim * 60.0 * config.WALK_SPEED
+        fz["need"] = safe["length"] > lim_m
+        if fz["need"]:
+            wr = frost.search(city, a, b, an["risks"], an["wind_k"], lim_m)
+            wlen = sum(city.edges[ei]["len"] for ei in wr["edges"]) if wr else 0.0
+            if wr and wlen <= max(1.3 * safe["length"], safe["length"] + 800.0):
+                safe_res = wr
+                safe = astar.describe(city, wr, an["risks"], an["wind_k"])
+                safe["minutes"] = round(safe["minutes"] + sum(st["min"] for st in wr["warm"]), 1)
+                fz["stops"] = [{k: st[k] for k in ("d", "name", "kind", "lon", "lat", "min")} for st in wr["warm"]]
+            else:
+                fz["ok"] = False
+                fz["pen"] = round(4.0 * (frost.minutes(safe["length"]) - lim), 1)
+        fz["max_out"] = round(frost.minutes(frost.stretches(city, safe_res if fz["ok"] else {"edges": safe_res["edges"]})), 1)
     transit = None
     if direct > config.TRANSIT_THRESHOLD_M and city.stops:
         cands = []
@@ -399,6 +416,8 @@ def route(city, an, weather, src, dst):
     out["transit"] = transit
     out["wave"] = _wave(city, safe_res)
     out["nav"] = nav.leg(city, safe_res)
+    out["nav"]["warm"] = fz["stops"]
+    out["frost"] = fz
     out["expanded_short"] = short["expanded"]
 
     path_edges = safe_res["edges"]
@@ -416,7 +435,7 @@ def route(city, an, weather, src, dst):
     else:
         ride, access, arisk = safe["length"] / config.TRANSIT_SPEED / 60.0, 6.0, safe["fall"] * 0.25
     inp = {"walk_min": safe["minutes"], "walk_risk": safe["fall"], "ride_min": ride, "access_min": access,
-           "access_risk": arisk, "cold_factor": cf, "transit_ok": 1 if transit else 0}
+           "access_risk": arisk, "cold_factor": cf, "transit_ok": 1 if transit else 0, "frost_pen": fz["pen"]}
     out["mdp"] = mdp.solve(inp, mdp.level(sev), trend)
     return out
 

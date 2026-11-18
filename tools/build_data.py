@@ -25,7 +25,7 @@ def from_pbf(path):
             t = o.tags
             if not o.location.valid() or not inside(o.location.lon, o.location.lat):
                 return
-            if t.get("highway") == "bus_stop" or t.get("shop") == "mall" or t.get("amenity") in ("cafe", "fast_food"):
+            if t.get("highway") == "bus_stop" or t.get("shop") in graph.WARM_SHOP or t.get("amenity") in graph.WARM_AMENITY:
                 self.misc.append({"type": "node", "id": o.id, "lon": o.location.lon, "lat": o.location.lat, "tags": dict(t)})
             elif t.get("highway") in ("traffic_signals", "crossing") or t.get("crossing") == "traffic_signals":
                 self.misc.append({"type": "node", "id": o.id, "lon": o.location.lon, "lat": o.location.lat,
@@ -34,7 +34,8 @@ def from_pbf(path):
         def way(self, o):
             t = o.tags
             hw, river = t.get("highway"), t.get("waterway") == "river"
-            water, mall, bld = t.get("natural") == "water", t.get("shop") == "mall", "building" in t
+            water, bld = t.get("natural") == "water", "building" in t
+            mall = t.get("shop") in graph.WARM_SHOP or t.get("amenity") in graph.WARM_AMENITY
             if not (hw in WALK or river or water or mall or bld):
                 return
             pts = [(nd.ref, nd.location.lon, nd.location.lat) for nd in o.nodes if nd.location.valid()]
@@ -49,7 +50,8 @@ def from_pbf(path):
             if mall:
                 cx = sum(x for _, x, _ in pts) / len(pts)
                 cy = sum(y for _, _, y in pts) / len(pts)
-                self.misc.append({"type": "way", "id": o.id, "center": {"lon": cx, "lat": cy}, "tags": {"shop": "mall", "name": tags.get("name", ""), "name:ru": tags.get("name:ru", "")}})
+                keep = {k: tags[k] for k in ("shop", "amenity", "name", "name:ru") if k in tags}
+                self.misc.append({"type": "way", "id": o.id, "center": {"lon": cx, "lat": cy}, "tags": keep})
             if river or water:
                 self.misc.append({"type": "way", "id": o.id, "geometry": geom, "tags": {k: tags[k] for k in ("waterway", "natural") if k in tags}})
 

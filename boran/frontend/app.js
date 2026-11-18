@@ -463,8 +463,8 @@
       arrows('b-route-arrows', 'b-route', P),
       { id: 'b-wave', type: 'circle', source: 'b-wave', paint: { 'circle-color': P.wave, 'circle-radius': 3, 'circle-opacity': 0.7, 'circle-pitch-alignment': 'map' } },
       { id: 'b-points', type: 'circle', source: 'b-points', paint: {
-        'circle-radius': ['case', ['==', ['get', 'k'], 'worst'], 14, 6], 'circle-color': ['case', ['==', ['get', 'k'], 'worst'], 'rgba(0,0,0,0)', isNight() ? '#0A1022' : '#FFFFFF'],
-        'circle-stroke-color': ['case', ['==', ['get', 'k'], 'worst'], P.worst, P.ride], 'circle-stroke-width': ['case', ['==', ['get', 'k'], 'worst'], 2.5, 3], 'circle-pitch-alignment': 'map' } },
+        'circle-radius': ['match', ['get', 'k'], 'worst', 14, 'warm', 9, 6], 'circle-color': ['match', ['get', 'k'], 'worst', 'rgba(0,0,0,0)', 'warm', P.warm, isNight() ? '#0A1022' : '#FFFFFF'],
+        'circle-stroke-color': ['match', ['get', 'k'], 'worst', P.worst, 'warm', '#FFFFFF', P.ride], 'circle-stroke-width': ['match', ['get', 'k'], 'worst', 2.5, 'warm', 2.5, 3], 'circle-pitch-alignment': 'map' } },
       { id: 'b-cmp-wave', type: 'circle', source: 'b-cmp-wave', paint: { 'circle-color': '#1E88E5', 'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 1.6, 16, 3.5], 'circle-opacity': 0.55, 'circle-pitch-alignment': 'map' } },
       { id: 'b-cmp-casing', type: 'line', source: 'b-cmp', filter: ['==', ['get', 'sel'], 1], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': P.routeCasing, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 7, 17, 14] } },
       { id: 'b-cmp', type: 'line', source: 'b-cmp', filter: ['==', ['get', 'sel'], 1], layout: { 'line-cap': 'round', 'line-join': 'round' },
@@ -648,6 +648,7 @@
     const pts = [];
     if (r.transit) r.transit.stops.forEach((s) => pts.push({ type: 'Feature', properties: { k: 'stop' }, geometry: { type: 'Point', coordinates: [s.lon, s.lat] } }));
     if (r.bayes && r.bayes.at) pts.push({ type: 'Feature', properties: { k: 'worst' }, geometry: { type: 'Point', coordinates: r.bayes.at } });
+    if (!r.transit && r.frost && r.frost.stops) r.frost.stops.forEach((w) => pts.push({ type: 'Feature', properties: { k: 'warm' }, geometry: { type: 'Point', coordinates: [w.lon, w.lat] } }));
     src('b-points').setData(FC(pts));
   }
 
@@ -809,6 +810,12 @@
       const legs = el('div', 'legs');
       legs.innerHTML = '<span>' + t('walk') + ' <b>' + num(r.transit.walk.minutes) + '</b></span><span class="sep">→</span><span>' + t('wait') + ' <b>' + num(r.transit.wait_min) + '</b></span><span class="sep">→</span><span>' + t('bus') + ' <b>' + num(r.transit.ride_min) + '</b></span><span class="sep">=</span><span>' + t('total') + ' <b>' + num(r.transit.total_min) + ' ' + t('min') + '</b></span>';
       cmp.append(legs);
+    }
+    const fz = r.frost;
+    if (fz && fz.limit) {
+      const w = num(Math.round(fz.wci)), names = (fz.stops || []).map((x) => x.name ? '«' + x.name + '»' : t('n_warm_' + x.kind)).join(', ');
+      const txt = !fz.ok ? t('f_bad', { w, lim: fz.limit, m: num(Math.round(fz.max_out)) }) : fz.stops && fz.stops.length ? t('f_stops', { w, lim: fz.limit, n: fz.stops.length, names }) : t('f_fine', { w, lim: fz.limit, m: num(Math.round(fz.max_out || r.safe.minutes)) });
+      cmp.append(el('div', 'frost ' + (fz.ok ? 'ok' : 'bad'), txt));
     }
     const grid = el('div', 'cmp');
     const cell = (cls, name, x) => '<div><div class="k"><i class="' + cls + '"></i>' + name + '</div><div class="v">' + num(x.minutes) + ' <small>' + t('min') + ' · ' + num(x.length / 1000, 1) + ' ' + t('km') + '</small></div><div class="r">' + t('risk') + ' <b>' + num(x.fall * 100, 1) + '%</b></div></div>';
@@ -1078,7 +1085,7 @@
     const local = [];
     const ql = q.toLowerCase();
     S.args.places.forEach((p) => { const nm = p.name[S.lang] || p.name.ru; if (nm.toLowerCase().includes(ql)) local.push({ name: nm, sub: '', lon: p.lon, lat: p.lat, id: p.id }); });
-    S.city.warm.forEach((m) => { if (m.name && m.name.toLowerCase().includes(ql)) local.push({ name: m.name, sub: m.kind === 'mall' ? t('mall') : t('cafe'), lon: m.lon, lat: m.lat }); });
+    S.city.warm.forEach((m) => { if (m.name && m.name.toLowerCase().includes(ql)) local.push({ name: m.name, sub: m.kind === 'mall' ? t('mall') : m.kind === 'shop' || m.kind === 'pharmacy' ? t('wk_' + m.kind) : t('cafe'), lon: m.lon, lat: m.lat }); });
     S.city.stops.forEach((m) => { if (m.name && m.name.toLowerCase().includes(ql)) local.push({ name: m.name, sub: t('stop'), lon: m.lon, lat: m.lat }); });
     let remote = [];
     try {
@@ -1140,6 +1147,7 @@
     return { now, feel, wind, ice, head, items };
   }
   const BRIEF_ICO = {
+    frost: '<svg viewBox="0 0 24 24"><path d="M12 2v20M3.3 7l17.4 10M20.7 7L3.3 17M9 3.5l3 2.5 3-2.5M9 20.5l3-2.5 3 2.5"/></svg>',
     coat: '<svg viewBox="0 0 24 24"><path d="M9 3l3 2 3-2 4 3-2 4-2-1v12H9V9L7 10 5 6z"/></svg>',
     ice: '<svg viewBox="0 0 24 24"><path d="M12 2v20M4 7l16 10M20 7L4 17"/></svg>',
     wind: '<svg viewBox="0 0 24 24"><path d="M3 9h11a3 3 0 1 0-3-3M3 15h15a3 3 0 1 1-3 3"/></svg>',
@@ -1167,6 +1175,7 @@
         ? '<p class="br-route">' + BRIEF_ICO.bus + t('b_r_bus', { min: Math.round(tr.total_min), w: Math.round(tr.walk.minutes) }) + '</p>'
         : '<p class="br-route">' + t('b_r_walk', { min: Math.round(s.minutes), km: (s.length / 1000).toFixed(1).replace('.', S.lang === 'en' ? '.' : ','), p: (s.fall * 100).toFixed(1).replace('.', S.lang === 'en' ? '.' : ',') }) + '</p>';
       if (tr && adv === 'transit') d.items.push(['bus', t('b_i_bus')]);
+      if (r.frost && r.frost.limit) d.items.unshift(['frost', t('b_i_frost', { w: fmt(Math.round(r.frost.wci)), lim: r.frost.limit })]);
     }
     b.innerHTML = '<div class="br">'
       + '<div class="br-l"><p class="br-k">' + t('b_title') + '</p><div class="br-temp">' + fmt(Math.round(d.now.temp)) + '°</div>'

@@ -14,7 +14,7 @@ import boran
 from boran import config, graph, pipeline, reports, weather
 
 _BORAN_DIR = os.path.dirname(os.path.abspath(boran.__file__))
-_RELOAD_ORDER = ["geo", "config", "hmm", "bayes", "astar", "search", "mdp", "nav", "reports", "weather", "demo", "graph", "pipeline"]
+_RELOAD_ORDER = ["geo", "config", "hmm", "bayes", "astar", "frost", "search", "mdp", "nav", "reports", "weather", "demo", "graph", "pipeline"]
 
 
 def code_signature():

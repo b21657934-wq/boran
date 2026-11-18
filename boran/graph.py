@@ -15,6 +15,8 @@ MIRRORS = [
 ]
 WALK = "trunk|primary|secondary|tertiary|residential|living_street|pedestrian|footway|path|unclassified|cycleway|steps|service|track"
 CLEANED = {"trunk", "primary", "secondary", "tertiary", "pedestrian"}
+WARM_SHOP = {"mall", "supermarket"}
+WARM_AMENITY = {"cafe", "fast_food", "restaurant", "pharmacy"}
 BIG = {"trunk", "primary", "secondary"}
 TRAFFIC_HW = {"trunk", "primary", "secondary", "tertiary", "unclassified", "residential"}
 FEATURE_BITS = {"shade": 1, "open": 2, "uncleaned": 4, "stop": 8, "bridge": 16}
@@ -47,8 +49,8 @@ def fetch_raw(bbox=config.BBOX):
         buildings += overpass(f'[out:json][timeout:120];way["building"]({a},{b},{c},{d});out geom;')
     misc = overpass(f'[out:json][timeout:120];(way["waterway"="river"]({bb});way["natural"="water"]({bb}););out geom;')
     misc += overpass(
-        f'[out:json][timeout:120];(node["highway"="bus_stop"]({bb});nwr["shop"="mall"]({bb});'
-        f'node["amenity"~"^(cafe|fast_food)$"]({bb}););out center;'
+        f'[out:json][timeout:120];(node["highway"="bus_stop"]({bb});nwr["shop"~"^(mall|supermarket)$"]({bb});'
+        f'nwr["amenity"~"^(cafe|fast_food|restaurant|pharmacy)$"]({bb}););out center;'
     )
     return {"roads": roads, "buildings": buildings, "misc": misc}
 
@@ -134,8 +136,8 @@ def build(raw, demo=False):
         if tags.get("highway") == "bus_stop" and lon is not None:
             stops.append({"lon": q(lon), "lat": q(lat), "name": tags.get("name:ru") or tags.get("name") or ""})
             sgrid.add(*proj.xy(lon, lat), len(stops) - 1)
-        elif (tags.get("shop") == "mall" or tags.get("amenity") in ("cafe", "fast_food")) and lon is not None:
-            kind = "mall" if tags.get("shop") == "mall" else "cafe"
+        elif (tags.get("shop") in WARM_SHOP or tags.get("amenity") in WARM_AMENITY) and lon is not None:
+            kind = "mall" if tags.get("shop") == "mall" else "shop" if tags.get("shop") else "pharmacy" if tags.get("amenity") == "pharmacy" else "cafe"
             warm.append({"lon": q(lon), "lat": q(lat), "name": tags.get("name:ru") or tags.get("name") or "", "kind": kind})
             wgrid.add(*proj.xy(lon, lat), len(warm) - 1)
         elif el.get("type") == "way" and el.get("geometry"):

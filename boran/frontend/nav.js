@@ -388,7 +388,8 @@
         const crossings = cs.map((c, i) => crossingScene(F, walk, c, phases.length * 10 + i, rnd)).sort((a, b) => a.sIn - b.sIn);
         const turns = ((navPlan && navPlan.turns) || []).map((x) => Object.assign({}, x, { s: walk.at(x.d) }));
         const ycors = [];
-        phases.push({ type: 'walk', kind, walk, crossings, turns, ycors, s: 0 });
+        const warm = ((navPlan && navPlan.warm) || []).map((w) => Object.assign({}, w, { s: walk.at(w.d), done: false }));
+        phases.push({ type: 'walk', kind, walk, crossings, turns, ycors, warm, s: 0 });
       };
       const sideOf = (st, q) => (q[0] - st.p[0]) * st.r[0] + (q[1] - st.p[1]) * st.r[1];
       const approach = (line, navPlan, st, sg, atStart) => {
@@ -666,6 +667,7 @@
       bus: '<svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="15" rx="3"/><path d="M5 11h14M8 21v-3M16 21v-3"/><circle cx="8.5" cy="14.5" r=".8"/><circle cx="15.5" cy="14.5" r=".8"/></svg>',
       stop: '<svg viewBox="0 0 24 24"><path d="M7 21V4h10v7H7"/><path d="M10 7.5h4"/></svg>',
       flag: '<svg viewBox="0 0 24 24"><path d="M6 21V4M6 4h11l-2 4 2 4H6"/></svg>',
+      warm: '<svg viewBox="0 0 24 24"><path d="M5 10h11v5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z"/><path d="M16 11h1.5a2.5 2.5 0 0 1 0 5H16M8 3c0 1.5 1.5 1.5 1.5 3S8 7.5 8 9M12 3c0 1.5 1.5 1.5 1.5 3S12 7.5 12 9"/></svg>',
     };
 
     function fmtM(m) {
@@ -683,6 +685,11 @@
         const dist = Math.max(0, X.sIn - s);
         const what = X.sig ? T('n_cross_sig') : T('n_cross_zebra');
         return [dist > 4 ? T('n_in', { m: fmtM(dist) }) + ' — ' + what.toLowerCase() : what, X.name ? T('n_across', { name: ctx.lang && ctx.lang() !== 'ru' ? X.name : accRu(X.name) }) : '', 'cross'];
+      }
+      const ws = (ph.warm || []).find((w) => !w.done && w.s > s - 1);
+      if (ws && ws.s - s < 200 && (!next || ws.s < next.s + 5)) {
+        const dist = Math.max(0, ws.s - s);
+        return [dist > 6 ? T('n_in', { m: fmtM(dist) }) + ' — ' + T('n_warm').toLowerCase() : T('n_warm'), ws.name || T('n_warm_' + (ws.kind || 'cafe')), 'warm'];
       }
       if (next) {
         const dist = next.s - s;
@@ -718,7 +725,7 @@
       run.plan.phases.forEach((ph, i) => {
         if (i < run.i) return;
         const cur = i === run.i;
-        if (ph.type === 'walk') m += (ph.walk.path.len - (cur ? run.s : 0)) / WALK / 60;
+        if (ph.type === 'walk') m += (ph.walk.path.len - (cur ? run.s : 0)) / WALK / 60 + (ph.warm || []).filter((w) => !w.done).reduce((a, w) => a + (w.min || 3), 0);
         if (ph.type === 'stop') m += cur ? Math.max(0, 7 - (run.stopT || 0) / 1.5) : 7;
         if (ph.type === 'ride') m += (ph.end - (cur ? clamp(run.bus.s, ph.start, ph.end) : ph.start)) / BUS / 60;
       });
@@ -738,6 +745,15 @@
 
     function stepWalk(ph, dtw, dtW) {
       const T = strings();
+      const wstop = (ph.warm || []).find((w) => !w.done && run.s >= w.s - 0.3);
+      if (wstop) {
+        run.warmT = (run.warmT || 0) + dtW;
+        setSig(null);
+        setHud(T('n_warming', { min: wstop.min || 3 }), wstop.name || T('n_warm_' + (wstop.kind || 'cafe')), 'warm');
+        run.cam = Object.assign({}, run.cam || {}, { A: 2.3 });
+        if (run.warmT > 3.2) { wstop.done = true; run.warmT = 0; }
+        return false;
+      }
       let target = run.s + WALK * BASE * dtw;
       let hold = null;
       for (const X of ph.crossings) {
@@ -1057,6 +1073,7 @@
           if (ph.type === 'walk') {
             run.s = target;
             ph.crossings.forEach((X) => { X.passing = false; X.yield = false; X.done = X.sOut < target; });
+            (ph.warm || []).forEach((w) => { w.done = w.s < target - 0.5; }); run.warmT = 0;
             if (i > 0) { run.bus.state = 'leave'; run.bus.s = run.bus.path ? run.bus.path.len : 0; } else { run.bus.state = null; run.bus.on = false; }
           } else if (ph.type === 'ride') {
             run.bus.path = ph.path; run.bus.on = true; run.bus.state = 'go'; run.bus.s = ph.start + target; run.bus.v = BUS * BASE; run.bus.rideT = 2; run.fromCam = null; run.hd = null;

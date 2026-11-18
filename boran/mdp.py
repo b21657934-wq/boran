@@ -35,7 +35,7 @@ def trend_from_forecast(now_sev, next_sev):
 def terminal(action, s, inp):
     m, cf = MULT[s], inp["cold_factor"]
     if action == "go":
-        return -(inp["walk_min"] * SLOW[s] + (FALL_COST * inp["walk_risk"] + inp["walk_min"] * cf) * m)
+        return -(inp["walk_min"] * SLOW[s] + (FALL_COST * inp["walk_risk"] + inp["walk_min"] * cf) * m + inp.get("frost_pen", 0.0) * m)
     out = inp["access_min"] + BUS_WAIT[s]
     return -(inp["ride_min"] + BUS_WAIT[s] + inp["access_min"] * SLOW[s] + (FALL_COST * inp["access_risk"] + out * cf) * m + TRANSIT_FEE)
 
