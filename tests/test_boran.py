@@ -98,7 +98,12 @@ def test_full_pipeline_on_demo_city():
     assert len(an["risks"]) == len(city.edges) and all(0 <= r <= 1 for r in an["risks"])
     far = pipeline.route(city, an, wx, (71.417377, 51.089187), (71.490789, 51.121652))
     assert far["mode"] == "transit" and far["mdp"]["best"] in mdp.ACTIONS
-    near = pipeline.route(city, an, wx, (71.417377, 51.089187), (71.4305, 51.1003))
+    cold = pipeline.route(city, an, wx, (71.417377, 51.089187), (71.4305, 51.1003))
+    assert cold["frost"]["limit"] == 10 and not cold["frost"]["ok"] and cold["mode"] == "transit"
+    mild = weather.scenario("thaw_freeze")
+    an2 = pipeline.analyse(city, mild)
+    near = pipeline.route(city, an2, mild, (71.417377, 51.089187), (71.4305, 51.1003))
+    assert near["frost"]["limit"] is None
     assert near["mode"] == "walk" and near["safe"]["length"] >= near["short"]["length"]
     assert near["safe"]["fall"] <= near["short"]["fall"] + 1e-9
 

@@ -329,7 +329,7 @@ def route(city, an, weather, src, dst, profile="base"):
                 fz["pen"] = round(4.0 * (frost.minutes(safe["length"], speed) - lim), 1)
         fz["max_out"] = round(frost.minutes(frost.stretches(city, safe_res if fz["ok"] else {"edges": safe_res["edges"]}), speed), 1)
     transit = None
-    if direct > config.TRANSIT_THRESHOLD_M and city.stops:
+    if (direct > config.TRANSIT_THRESHOLD_M or not fz["ok"]) and city.stops:
         cands = []
         on_road = lambda sid: _road_node(city, city.stops[sid]["lon"], city.stops[sid]["lat"], None, 90.0) is not None
         for sa in [i for i in city.stops_near(*src, k=8) if on_road(i)][:4]:
