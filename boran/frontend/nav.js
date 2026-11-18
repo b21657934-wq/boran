@@ -89,9 +89,9 @@
     const base = new Path(line.map((p) => F.xy(p)));
     const scale = plan && plan.length ? Math.max(0.5, (base.len - pre - post) / plan.length) : 1;
     const segs = (plan && plan.segs) || [];
-    const hwAt = (s) => { const d = (s - pre) / scale; if (d < 0) return null; for (let i = segs.length - 1; i >= 0; i--) if (segs[i][0] <= d + 0.01) return segs[i][1]; return null; };
+    const hwAt = (s) => { const d = (s - pre) / scale; if (d < 0 || (plan && plan.length && d > plan.length + 0.5)) return null; for (let i = segs.length - 1; i >= 0; i--) if (segs[i][0] <= d + 0.01) return segs[i][1]; return null; };
     const P = base.pts, n = P.length, C = base.cum;
-    const segAt = (s) => { const d = (s - pre) / scale; if (d < 0) return null; for (let i = segs.length - 1; i >= 0; i--) if (segs[i][0] <= d + 0.01) return segs[i]; return null; };
+    const segAt = (s) => { const d = (s - pre) / scale; if (d < 0 || (plan && plan.length && d > plan.length + 0.5)) return null; for (let i = segs.length - 1; i >= 0; i--) if (segs[i][0] <= d + 0.01) return segs[i]; return null; };
     const offAt = (s) => { const sg = segAt(s); return sg && WIDTH[sg[1]] ? halfOf(sg[1], sg[3]) + 2.0 : 0; };
     const ahead = (i) => { let j = i + 1; while (j < n - 1 && C[j] - C[i] < 2.5) j++; return j; };
     const K = [0];
@@ -201,6 +201,7 @@
     let run = null;
 
     function strings() { return ctx.t; }
+    function accRu(n) { return n.replace(/^улица /, 'улицу ').replace(/^набережная /, 'набережную ').replace(/^аллея /, 'аллею ').replace(/^площадь /, 'площадь ').replace(/ улица$/, ' улицу'); }
     function night() { return ctx.isNight(); }
 
     function addLayers() {
@@ -374,18 +375,36 @@
       const F = new Frame(first[0], first[1]);
       const rnd = rng(Math.round(Math.abs(first[0] * 1e5 + first[1] * 1e5)));
       const phases = [];
-      const addWalk = (line, navPlan, kind, prefix, suffix) => {
-        let pts = line.slice();
-        const first = F.xy(line[0]), last = F.xy(line[line.length - 1]);
-        const pre = prefix ? Math.hypot(first[0] - prefix[0], first[1] - prefix[1]) : 0;
-        const post = suffix ? Math.hypot(last[0] - suffix[0], last[1] - suffix[1]) : 0;
-        if (prefix) pts = [F.ll(prefix)].concat(pts);
-        if (suffix) pts = pts.concat([F.ll(suffix)]);
-        const walk = buildWalk(F, pts, navPlan, pre, post);
-        const crossings = ((navPlan && navPlan.cross) || []).map((c, i) => crossingScene(F, walk, c, phases.length * 10 + i, rnd));
+      const plLen = (pts) => { let a = 0; for (let i = 1; i < pts.length; i++) a += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return a; };
+      const shape = (line, navPlan, prefix, suffix) => {
+        const pre = prefix && prefix.length ? plLen(prefix.concat([F.xy(line[0])])) : 0;
+        const post = suffix && suffix.length ? plLen([F.xy(line[line.length - 1])].concat(suffix)) : 0;
+        const pts = (prefix || []).map((q) => F.ll(q)).concat(line, (suffix || []).map((q) => F.ll(q)));
+        return { walk: buildWalk(F, pts, navPlan, pre, post), pre, post };
+      };
+      const addWalk = (line, navPlan, kind, prefix, suffix, extra) => {
+        const { walk } = shape(line, navPlan, prefix, suffix);
+        const cs = ((navPlan && navPlan.cross) || []).concat(extra || []);
+        const crossings = cs.map((c, i) => crossingScene(F, walk, c, phases.length * 10 + i, rnd)).sort((a, b) => a.sIn - b.sIn);
         const turns = ((navPlan && navPlan.turns) || []).map((x) => Object.assign({}, x, { s: walk.at(x.d) }));
         const ycors = [];
         phases.push({ type: 'walk', kind, walk, crossings, turns, ycors, s: 0 });
+      };
+      const sideOf = (st, q) => (q[0] - st.p[0]) * st.r[0] + (q[1] - st.p[1]) * st.r[1];
+      const approach = (line, navPlan, st, sg, atStart) => {
+        const tail = atStart ? null : [st.spot], head = atStart ? [st.spot] : null;
+        const probe = shape(line, navPlan, head, tail);
+        const w = probe.walk, E = w.path.pos(w.toWalk(atStart ? probe.pre : w.base.len - probe.post));
+        if (sideOf(st, E) >= st.curb - 0.3) return { prefix: head, suffix: tail, extra: [] };
+        const a = clamp((E[0] - st.p[0]) * st.t[0] + (E[1] - st.p[1]) * st.t[1], atStart ? -32 : -30, atStart ? -17 : -12);
+        const q = [st.p[0] + st.t[0] * a, st.p[1] + st.t[1] * a], o = st.curb + 1.4;
+        const L = [q[0] - st.r[0] * o, q[1] - st.r[1] * o], R = [q[0] + st.r[0] * o, q[1] + st.r[1] * o];
+        const ends = F.xy(atStart ? line[0] : line[line.length - 1]);
+        const scale = w.scale || 1;
+        const span = (Math.hypot(L[0] - ends[0], L[1] - ends[1]) + o) / scale;
+        const c = { at: F.ll(q), road: st.h, hw: sg[1], half: st.curb, ow: !!sg[2], sig: false, zebra: true, name: st.name, median: 0,
+          d: atStart ? -span : ((navPlan && navPlan.length) || w.base.len / scale) + span };
+        return atStart ? { prefix: [st.spot, R, L], suffix: null, extra: [c] } : { prefix: null, suffix: [L, R, st.spot], extra: [c] };
       };
       if (!tr) {
         addWalk(route.safe.line, route.nav, 'dest');
@@ -400,11 +419,13 @@
         path.lane = laneAt;
         const stA = stopScene(F, path.slice(170, path.len - 170), false, tr.stops[0], rnd, curbAt(178));
         const stB = stopScene(F, path.slice(170, path.len - 170), true, tr.stops[1], rnd, curbAt(path.len - 178));
-        addWalk(tr.legs[0], tr.nav && tr.nav.legs[0], 'stop', null, stA.spot);
+        const apA = approach(tr.legs[0], tr.nav && tr.nav.legs[0], stA, segAt(178), false);
+        addWalk(tr.legs[0], tr.nav && tr.nav.legs[0], 'stop', apA.prefix, apA.suffix, apA.extra);
         phases.push({ type: 'stop', stop: stA, path, t0: null });
         phases.push({ type: 'ride', path, start: 170, end: path.len - 170, stops: ((tr.nav && tr.nav.ride_stops) || []).map((x) => Object.assign({}, x, { s: 170 + x.d * (core.len / Math.max(1, sumLen(tr.ride, F))) })), stopB: stB });
         phases.push({ type: 'alight', stop: stB, path });
-        addWalk(tr.legs[1], tr.nav && tr.nav.legs[1], 'dest', stB.spot, null);
+        const apB = approach(tr.legs[1], tr.nav && tr.nav.legs[1], stB, segAt(path.len - 178), true);
+        addWalk(tr.legs[1], tr.nav && tr.nav.legs[1], 'dest', apB.prefix, apB.suffix, apB.extra);
       }
       phases.push({ type: 'done' });
       return { F, rnd, phases, route };
@@ -661,7 +682,7 @@
       if (X && X.sIn - s < 60 && (!next || X.sIn < next.s + 5)) {
         const dist = Math.max(0, X.sIn - s);
         const what = X.sig ? T('n_cross_sig') : T('n_cross_zebra');
-        return [dist > 4 ? T('n_in', { m: fmtM(dist) }) + ' — ' + what.toLowerCase() : what, X.name ? T('n_across', { name: X.name }) : '', 'cross'];
+        return [dist > 4 ? T('n_in', { m: fmtM(dist) }) + ' — ' + what.toLowerCase() : what, X.name ? T('n_across', { name: ctx.lang && ctx.lang() !== 'ru' ? X.name : accRu(X.name) }) : '', 'cross'];
       }
       if (next) {
         const dist = next.s - s;
@@ -915,7 +936,7 @@
       } else if (ph.type === 'stop') { done = stepStop(ph, dtW); setSig(null); }
       else if (ph.type === 'ride') done = stepRide(ph, dtR, dtW);
       if (run.bus.state === 'leave') { run.bus.v = Math.min(12, (run.bus.v || 0) + 2 * dtW); run.bus.s += run.bus.v * dtW; }
-      else if (ph.type === 'alight') done = stepAlight(ph, dtW);
+      if (ph.type === 'alight') done = stepAlight(ph, dtW);
       else if (ph.type === 'done') { finish(); return; }
       if (done) next();
       if (run && run.cam) camera(run.cam.W, run.cam.hd, run.cam.A, run.cam.th, run.cam.back);
@@ -1036,7 +1057,7 @@
           if (ph.type === 'walk') {
             run.s = target;
             ph.crossings.forEach((X) => { X.passing = false; X.yield = false; X.done = X.sOut < target; });
-            if (i > 0 && run.i > 0) { run.bus.state = 'leave'; run.bus.s = run.bus.path ? run.bus.path.len : 0; }
+            if (i > 0) { run.bus.state = 'leave'; run.bus.s = run.bus.path ? run.bus.path.len : 0; } else { run.bus.state = null; run.bus.on = false; }
           } else if (ph.type === 'ride') {
             run.bus.path = ph.path; run.bus.on = true; run.bus.state = 'go'; run.bus.s = ph.start + target; run.bus.v = BUS * BASE; run.bus.rideT = 2; run.fromCam = null; run.hd = null;
           } else if (ph.type === 'stop') { run.stopT = 0; run.bus.on = false; run.bus.path = ph.path; ph.stop.people.forEach((p) => { p.gone = false; }); }

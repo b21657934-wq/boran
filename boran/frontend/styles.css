@@ -331,7 +331,7 @@ body.navmode #top,body.navmode #panel,body.navmode #legend,body.navmode #btn-loc
 .nav-fin div{display:flex;gap:10px}.nav-fin .cta{margin:0;flex:1}
 @media (max-width:760px){
   .nav-top{padding:10px 12px;gap:10px}.nav-ico{width:44px;height:44px}.nav-txt b{font-size:17px}
-  .nav-sig{top:calc(var(--sat) + 92px);font-size:14px}
+  .nav-sig{top:calc(var(--sat) + 92px);left:12px;transform:none;max-width:calc(100% - 146px);font-size:14px;line-height:1.25}
   .nav-bar{flex-wrap:wrap;gap:8px;bottom:calc(var(--sab) + 10px)}
   .nav-prog{order:3;flex-basis:100%}
   .nav-eta{min-width:0;flex:1}
@@ -365,7 +365,7 @@ body.night .nav-mini .m-w{stroke:#7FE7F5}body.night .nav-mini .m-r{stroke:#B9A6F
 body.navfp .nav-mini{opacity:.92}
 @media (max-width:760px){
   .nav-mini{left:auto;right:10px;top:calc(var(--sat) + 86px);bottom:auto;width:112px;height:112px;padding:4px;border-radius:14px}
-  .nav-street{bottom:calc(var(--sab) + 120px);font-size:14px}
+  .nav-street{bottom:calc(var(--sab) + 150px);font-size:14px}
   .nav-view button{padding:0 8px;font-size:12px}
 }
 
