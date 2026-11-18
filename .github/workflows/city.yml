@@ -22,10 +22,17 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install requests osmium
-      - run: curl -4 -fL --retry 5 --retry-delay 10 -o /tmp/kazakhstan.osm.pbf https://download.geofabrik.de/asia/kazakhstan-latest.osm.pbf
-      - run: python tools/build_data.py /tmp/kazakhstan.osm.pbf
-      - run: python tools/build_night.py
+      - id: dl
+        continue-on-error: true
+        run: curl -4 -fL --retry 5 --retry-delay 10 -o /tmp/kazakhstan.osm.pbf https://download.geofabrik.de/asia/kazakhstan-latest.osm.pbf
+      - if: steps.dl.outcome != 'success'
+        run: echo "::warning::Geofabrik is unreachable, keeping the committed map data"
+      - if: steps.dl.outcome == 'success'
+        run: python tools/build_data.py /tmp/kazakhstan.osm.pbf
+      - if: steps.dl.outcome == 'success'
+        run: python tools/build_night.py
       - name: Commit data
+        if: steps.dl.outcome == 'success'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
