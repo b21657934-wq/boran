@@ -115,8 +115,8 @@ def find_compare(name, stamp, signature, rkey, src, dst):
 
 
 @st.cache_data(ttl=600, show_spinner=False, max_entries=64)
-def find_route(name, stamp, signature, rkey, src, dst):
-    return pipeline.route(load_city(signature)[0], analyse_live(name, stamp, signature, rkey), load_weather(name), src, dst)
+def find_route(name, stamp, signature, rkey, src, dst, profile):
+    return pipeline.route(load_city(signature)[0], analyse_live(name, stamp, signature, rkey), load_weather(name), src, dst, profile)
 
 
 loading = st.empty()
@@ -154,10 +154,11 @@ except OSError:
 
 route = None
 error = None
+profile = state.get("prof") if state.get("prof") in config.PROFILES else "base"
 src, dst = state.get("src"), state.get("dst")
 if src and dst:
     try:
-        route = find_route(scenario, stamp, sig, rkey, (round(src[0], 5), round(src[1], 5)), (round(dst[0], 5), round(dst[1], 5)))
+        route = find_route(scenario, stamp, sig, rkey, (round(src[0], 5), round(src[1], 5)), (round(dst[0], 5), round(dst[1], 5)), profile)
         if route is None:
             error = "no_path"
     except Exception as exc:

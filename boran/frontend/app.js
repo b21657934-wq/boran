@@ -14,7 +14,7 @@
     args: null, city: null, cityVersion: null, lang: store.get('boran.lang', 'ru'), themeForce: store.get('boran.theme', null),
     src: null, dst: null, picking: null, markMode: false, n: 0, pendingRoute: false,
     routeKey: null, routeT0: 0, waveT0: 0, view: null, riskTable: null, tiles: new Map(), tileReq: new Map(), tileShown: '',
-    reps: null, repsAt: 0, repsV: -1, pendingReps: [], marksTab: 'city', splashDone: false, introDone: false, t0: performance.now(),
+    reps: null, repsAt: 0, repsV: -1, pendingReps: [], marksTab: 'city', prof: store.get('boran.prof', 'base'), splashDone: false, introDone: false, t0: performance.now(),
   };
   const t = (k, vars) => { let s = (window.I18N[S.lang] || window.I18N.ru)[k]; if (s == null) s = window.I18N.ru[k] ?? k; if (vars) for (const a in vars) s = s.split('{' + a + '}').join(vars[a]); return s; };
   const num = (v, d = 0) => Number(v).toFixed(d).replace('-', '−');
@@ -27,7 +27,7 @@
     S.n += 1;
     post('streamlit:setComponentValue', {
       dataType: 'json',
-      value: { n: S.n, rep: S.pendingReps.slice(-20), scenario: S.scenario || 'live', src: S.wantRoute && S.src ? [S.src.lon, S.src.lat] : null, dst: S.wantRoute && S.dst ? [S.dst.lon, S.dst.lat] : null, cmp: !!(S.wantCompare && S.wantRoute) },
+      value: { n: S.n, rep: S.pendingReps.slice(-20), prof: S.prof, scenario: S.scenario || 'live', src: S.wantRoute && S.src ? [S.src.lon, S.src.lat] : null, dst: S.wantRoute && S.dst ? [S.dst.lon, S.dst.lat] : null, cmp: !!(S.wantCompare && S.wantRoute) },
     });
   }
   window.addEventListener('message', (e) => { if (e.data && e.data.type === 'streamlit:render') onRender(e.data.args.payload); });
@@ -541,7 +541,7 @@
     map.on('error', (ev) => { if (ev && ev.error && /style|layers\[/.test(String(ev.error.message))) console.warn(ev.error.message); });
     window.__map = map;
     if (NAV) NAV.stop(true);
-    NAV = window.BoranNav ? window.BoranNav.create({ map, t, isNight, lang: () => S.lang, onStart: navStart, onExit: navExit, roadsNear }) : null;
+    NAV = window.BoranNav ? window.BoranNav.create({ map, t, isNight, lang: () => S.lang, onStart: navStart, onExit: navExit, roadsNear, onShare: () => openShare('arrived') }) : null;
     requestAnimationFrame(frame);
     if (!S.city.demo) {
       try {
@@ -737,7 +737,44 @@
     return p.label || t('mappoint');
   }
 
+  const WHO = ['base', 'elder', 'stroller', 'wheel'];
+  function renderWho() {
+    const box = $('who');
+    box.innerHTML = '<span class="who-t">' + t('who_t') + '</span>' + WHO.map((k) => '<button role="radio" data-k="' + k + '" aria-checked="' + (S.prof === k) + '">' + t('who_' + k) + '</button>').join('');
+    box.querySelectorAll('button').forEach((b) => { b.onclick = () => {
+      if (S.prof === b.dataset.k) return;
+      S.prof = b.dataset.k; store.set('boran.prof', S.prof); S.routeKey = null; renderWho();
+      if (S.wantRoute) { S.pendingRoute = true; $('btn-go').classList.add('busy'); send(); }
+    }; });
+  }
+  const SITE = (() => { try { return window.parent.location.origin; } catch (e) { return 'https://befpgfqzxitunj2kma6ebo.streamlit.app'; } })();
+  const hhmm = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  function shareText(kind) {
+    const to = placeName(S.dst), from = placeName(S.src), r = S.args && S.args.route;
+    if (kind === 'arrived' || !r) return t('sh_arrived', { to, time: hhmm(new Date()) });
+    const min = Math.round(r.transit && r.mdp && r.mdp.best === 'transit' ? r.transit.total_min : r.safe.minutes);
+    return t('sh_leave', { from, to, min, eta: hhmm(new Date(Date.now() + min * 60000)) });
+  }
+  function openShare(kind) {
+    const text = shareText(kind), full = text + '\n' + SITE;
+    const box = $('share');
+    box.innerHTML = '<h3>' + t('sh_title') + '</h3><p class="sh-text">' + esc(text) + '</p><div class="sh-row">'
+      + '<a class="btn2 sh-wa" target="_blank" rel="noopener" href="https://wa.me/?text=' + encodeURIComponent(full) + '">WhatsApp</a>'
+      + '<a class="btn2 sh-tg" target="_blank" rel="noopener" href="https://t.me/share/url?url=' + encodeURIComponent(SITE) + '&text=' + encodeURIComponent(text) + '">Telegram</a>'
+      + '<button class="btn2 sh-copy">' + t('sh_copy') + '</button></div><button class="x sh-x" aria-label="close"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>';
+    box.hidden = false;
+    box.querySelector('.sh-x').onclick = () => { box.hidden = true; };
+    box.querySelector('.sh-copy').onclick = async () => {
+      let ok = false;
+      try { await navigator.clipboard.writeText(full); ok = true; } catch (e) {
+        const ta = el('textarea'); ta.value = full; document.body.append(ta); ta.select(); try { ok = document.execCommand('copy'); } catch (e2) { ok = false; } ta.remove();
+      }
+      toast(ok ? t('sh_copied') : full);
+    };
+  }
+
   function renderAll() {
+    renderWho();
     const a = S.args, wx = a.weather, now = wx.now;
     document.documentElement.lang = S.lang === 'kk' ? 'kk' : S.lang;
     $('t-brain').textContent = t('brain'); $('t-scn').textContent = t('scn'); $('t-from').textContent = t('from'); $('t-to').textContent = t('to');
@@ -817,11 +854,14 @@
       const txt = !fz.ok ? t('f_bad', { w, lim: fz.limit, m: num(Math.round(fz.max_out)) }) : fz.stops && fz.stops.length ? t('f_stops', { w, lim: fz.limit, n: fz.stops.length, names }) : t('f_fine', { w, lim: fz.limit, m: num(Math.round(fz.max_out || r.safe.minutes)) });
       cmp.append(el('div', 'frost ' + (fz.ok ? 'ok' : 'bad'), txt));
     }
+    if (r.profile && r.profile !== 'base') cmp.append(el('div', 'who-note', t('who_note_' + r.profile)));
+    if ((r.profile === 'stroller' || r.profile === 'wheel') && r.steps > 0) cmp.append(el('div', 'frost bad', t('who_steps', { n: r.steps })));
     const grid = el('div', 'cmp');
     const cell = (cls, name, x) => '<div><div class="k"><i class="' + cls + '"></i>' + name + '</div><div class="v">' + num(x.minutes) + ' <small>' + t('min') + ' · ' + num(x.length / 1000, 1) + ' ' + t('km') + '</small></div><div class="r">' + t('risk') + ' <b>' + num(x.fall * 100, 1) + '%</b></div></div>';
     grid.innerHTML = cell('', t('safe') + (r.transit ? ' · ' + t('walk') : ''), A) + cell('s', t('short') + (r.transit ? ' · ' + t('walk') : ''), B);
     cmp.append(grid);
     if (r.transit) cmp.append(el('div', 'note', t('t_note')));
+    const sh = el('button', 'btn2 sh-open', t('sh_btn')); sh.onclick = () => openShare('leave'); cmp.append(sh);
     $('btn-cmp').innerHTML = t('cmp_btn') + ' <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>';
     $('btn-why').innerHTML = t('how') + ' <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>';
   }
@@ -1176,6 +1216,7 @@
         : '<p class="br-route">' + t('b_r_walk', { min: Math.round(s.minutes), km: (s.length / 1000).toFixed(1).replace('.', S.lang === 'en' ? '.' : ','), p: (s.fall * 100).toFixed(1).replace('.', S.lang === 'en' ? '.' : ',') }) + '</p>';
       if (tr && adv === 'transit') d.items.push(['bus', t('b_i_bus')]);
       if (r.frost && r.frost.limit) d.items.unshift(['frost', t('b_i_frost', { w: fmt(Math.round(r.frost.wci)), lim: r.frost.limit })]);
+      if (r.profile && r.profile !== 'base') d.items.unshift(['ice', t('b_i_' + r.profile)]);
     }
     b.innerHTML = '<div class="br">'
       + '<div class="br-l"><p class="br-k">' + t('b_title') + '</p><div class="br-temp">' + fmt(Math.round(d.now.temp)) + '°</div>'

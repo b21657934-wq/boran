@@ -1001,7 +1001,7 @@
         '<div class="nav-view" role="group" aria-label="' + T('n_view') + '"><button data-v="nav">' + T('n_view_nav') + '</button><button data-v="fp">' + T('n_view_fp') + '</button></div>' +
         '<div class="nav-speed" role="group" aria-label="' + T('n_speed') + '">' + [1, 2, 3, 4, 5].map((k) => '<button data-k="' + k + '">' + k + '×</button>').join('') + '</div>' +
         '<button class="nav-x" aria-label="' + T('n_exit') + '"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>' +
-        '<div class="nav-fin glass" hidden><h3>' + T('n_arrive') + '</h3><p></p><div><button class="cta nav-again">' + T('n_again') + '</button><button class="btn2 nav-close">' + T('n_close') + '</button></div></div>';
+        '<div class="nav-fin glass" hidden><h3>' + T('n_arrive') + '</h3><p></p><div><button class="cta nav-again">' + T('n_again') + '</button><button class="btn2 nav-share">' + T('n_share') + '</button><button class="btn2 nav-close">' + T('n_close') + '</button></div></div>';
       document.body.appendChild(root);
       const q = (s) => root.querySelector(s);
       const h = { root, icon: q('.nav-ico'), main: q('.nav-txt b'), sub: q('.nav-txt small'), sig: q('.nav-sig'), frame: q('.nav-frame'), bar: q('.nav-prog i'), eta: q('.nav-eta'), fin: q('.nav-fin'), play: q('.nav-play'), speed: q('.nav-speed'), mini: q('.nav-mini svg'), street: q('.nav-street'), view: q('.nav-view') };
@@ -1012,6 +1012,7 @@
       h.speed.querySelectorAll('button').forEach((b) => { b.onclick = () => api.setSpeed(+b.dataset.k); });
       q('.nav-x').onclick = () => api.stop();
       q('.nav-close').onclick = () => api.stop();
+      q('.nav-share').onclick = () => { if (ctx.onShare) ctx.onShare(); };
       q('.nav-again').onclick = () => { const r = run.plan.route; api.stop(true); api.start(r); };
       q('.nav-prog').onclick = (ev) => { if (!run || run.done) return; const box = ev.currentTarget.getBoundingClientRect(); seek((ev.clientX - box.left) / box.width); };
       return h;

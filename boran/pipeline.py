@@ -12,11 +12,13 @@ def analyse(city, weather):
     return {"hmm": h, "prior": prior, "risks": risks, "wind_k": wind_k, "table": [table[m] for m in range(32)]}
 
 
-def _leg(city, a, b, an, safe=True):
-    res = astar.search(city, a, b, an["risks"], an["wind_k"], safe=safe)
+def _leg(city, a, b, an, safe=True, prof=None):
+    res = astar.search(city, a, b, an["risks"], an["wind_k"], safe=safe, prof=prof)
+    if res is None and prof and prof["steps"] is None:
+        res = astar.search(city, a, b, an["risks"], an["wind_k"], safe=safe, prof=dict(prof, steps=15.0))
     if res is None:
         return None, None
-    return res, astar.describe(city, res, an["risks"], an["wind_k"])
+    return res, astar.describe(city, res, an["risks"], an["wind_k"], speed=prof["speed"] if prof else None)
 
 
 ROADS = {"trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "living_street"}
@@ -298,46 +300,48 @@ def _edge_feats(ed):
     return {f: bool(ed["mask"] & bit) for f, bit in zip(bayes.FEATURES, (1, 2, 4, 8, 16))}
 
 
-def route(city, an, weather, src, dst):
+def route(city, an, weather, src, dst, profile="base"):
+    prof = None if profile not in config.PROFILES or profile == "base" else config.PROFILES[profile]
+    speed = prof["speed"] if prof else config.WALK_SPEED
     a = city.nearest_node(*src)
     b = city.nearest_node(*dst)
     direct = haversine(src[0], src[1], dst[0], dst[1])
     out = {"direct": round(direct), "src": list(src), "dst": list(dst)}
-    safe_res, safe = _leg(city, a, b, an, True)
-    short_res, short = _leg(city, a, b, an, False)
+    safe_res, safe = _leg(city, a, b, an, True, prof)
+    short_res, short = _leg(city, a, b, an, False, prof)
     if safe is None:
         return None
     wci, lim, band = frost.limit(weather["now"]["temp"], weather["now"]["wind"])
     fz = {"wci": wci, "limit": lim, "band": band, "need": False, "ok": True, "stops": [], "pen": 0.0}
     if lim is not None:
-        lim_m = lim * 60.0 * config.WALK_SPEED
+        lim_m = lim * 60.0 * speed
         fz["need"] = safe["length"] > lim_m
         if fz["need"]:
-            wr = frost.search(city, a, b, an["risks"], an["wind_k"], lim_m)
+            wr = frost.search(city, a, b, an["risks"], an["wind_k"], lim_m, prof=prof)
             wlen = sum(city.edges[ei]["len"] for ei in wr["edges"]) if wr else 0.0
             if wr and wlen <= max(1.3 * safe["length"], safe["length"] + 800.0):
                 safe_res = wr
-                safe = astar.describe(city, wr, an["risks"], an["wind_k"])
+                safe = astar.describe(city, wr, an["risks"], an["wind_k"], speed=speed)
                 safe["minutes"] = round(safe["minutes"] + sum(st["min"] for st in wr["warm"]), 1)
                 fz["stops"] = [{k: st[k] for k in ("d", "name", "kind", "lon", "lat", "min")} for st in wr["warm"]]
             else:
                 fz["ok"] = False
-                fz["pen"] = round(4.0 * (frost.minutes(safe["length"]) - lim), 1)
-        fz["max_out"] = round(frost.minutes(frost.stretches(city, safe_res if fz["ok"] else {"edges": safe_res["edges"]})), 1)
+                fz["pen"] = round(4.0 * (frost.minutes(safe["length"], speed) - lim), 1)
+        fz["max_out"] = round(frost.minutes(frost.stretches(city, safe_res if fz["ok"] else {"edges": safe_res["edges"]}), speed), 1)
     transit = None
     if direct > config.TRANSIT_THRESHOLD_M and city.stops:
         cands = []
         on_road = lambda sid: _road_node(city, city.stops[sid]["lon"], city.stops[sid]["lat"], None, 90.0) is not None
         for sa in [i for i in city.stops_near(*src, k=8) if on_road(i)][:4]:
             na = city.nearest_node(city.stops[sa]["lon"], city.stops[sa]["lat"])
-            ra, da = _leg(city, a, na, an, True)
+            ra, da = _leg(city, a, na, an, True, prof)
             if da is None:
                 continue
             for sb in [i for i in city.stops_near(*dst, k=8) if on_road(i)][:4]:
                 if sa == sb:
                     continue
                 nb = city.nearest_node(city.stops[sb]["lon"], city.stops[sb]["lat"])
-                rb, db = _leg(city, nb, b, an, True)
+                rb, db = _leg(city, nb, b, an, True, prof)
                 if db is None:
                     continue
                 cands.append((ra["cost"] + rb["cost"], sa, sb, ra, da, rb, db, na, nb))
@@ -371,11 +375,11 @@ def route(city, an, weather, src, dst):
             A, B = city.stops[sa], city.stops[sb]
             ka, kb = _kerb_node(city, ride_line, A, False, na), _kerb_node(city, ride_line, B, True, nb)
             if ka != na:
-                r2, d2 = _leg(city, a, ka, an, True)
+                r2, d2 = _leg(city, a, ka, an, True, prof)
                 if d2 is not None:
                     ra, da, na = r2, d2, ka
             if kb != nb:
-                r2, d2 = _leg(city, kb, b, an, True)
+                r2, d2 = _leg(city, kb, b, an, True, prof)
                 if d2 is not None:
                     rb, db, nb = r2, d2, kb
 
@@ -391,8 +395,8 @@ def route(city, an, weather, src, dst):
                 ride_line = [[A["lon"], A["lat"]], [B["lon"], B["lat"]]]
                 ride_m = haversine(A["lon"], A["lat"], B["lon"], B["lat"]) * 1.3
             ride_min = ride_m / config.TRANSIT_SPEED / 60.0
-            _, sda = _leg(city, a, na, an, False)
-            _, sdb = _leg(city, nb, b, an, False)
+            _, sda = _leg(city, a, na, an, False, prof)
+            _, sdb = _leg(city, nb, b, an, False, prof)
             walk = _merge([da, db])
             transit = {
                 "legs": [da["line"], db["line"]],
@@ -411,6 +415,8 @@ def route(city, an, weather, src, dst):
                 "expanded": da["expanded"] + db["expanded"],
             }
     out["mode"] = "transit" if transit else "walk"
+    out["profile"] = profile if prof else "base"
+    out["steps"] = sum(1 for ei in safe_res["edges"] if city.edges[ei]["hw"] == "steps")
     out["safe"] = safe
     out["short"] = short
     out["transit"] = transit
@@ -435,7 +441,7 @@ def route(city, an, weather, src, dst):
     else:
         ride, access, arisk = safe["length"] / config.TRANSIT_SPEED / 60.0, 6.0, safe["fall"] * 0.25
     inp = {"walk_min": safe["minutes"], "walk_risk": safe["fall"], "ride_min": ride, "access_min": access,
-           "access_risk": arisk, "cold_factor": cf, "transit_ok": 1 if transit else 0, "frost_pen": fz["pen"]}
+           "access_risk": arisk, "cold_factor": cf, "transit_ok": 1 if transit else 0, "frost_pen": fz["pen"], "fall_k": prof["fall"] if prof else 1.0}
     out["mdp"] = mdp.solve(inp, mdp.level(sev), trend)
     return out
 

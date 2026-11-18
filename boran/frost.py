@@ -39,12 +39,12 @@ def warm_nodes(city):
     return city._warm_nodes
 
 
-def search(city, start, goal, risks, wind_k, limit_m, stop_min=STOP_MIN):
+def search(city, start, goal, risks, wind_k, limit_m, stop_min=STOP_MIN, prof=None):
     warm = warm_nodes(city)
     nodes = city.nodes
     glon, glat = nodes[goal]
     h = lambda n: haversine(nodes[n][0], nodes[n][1], glon, glat)
-    stop_cost = stop_min * 60.0 * config.WALK_SPEED
+    stop_cost = stop_min * 60.0 * (prof["speed"] if prof else config.WALK_SPEED)
     labels = {}
     parent = []
     dead = set()
@@ -86,9 +86,9 @@ def search(city, start, goal, risks, wind_k, limit_m, stop_min=STOP_MIN):
         for v, ei in city.adj[n]:
             ed = city.edges[ei]
             nb = b + ed["len"]
-            if nb > limit_m:
+            if nb > limit_m or astar.blocked(ed, prof):
                 continue
-            add(v, g + astar.edge_cost(ed, risks[ei], wind_k), nb, lid, ei)
+            add(v, g + astar.edge_cost(ed, risks[ei], wind_k, prof=prof), nb, lid, ei)
     if found is None:
         return None
     chain = []
@@ -118,5 +118,5 @@ def stretches(city, res):
     return max((b - a for a, b in zip(cuts, cuts[1:])), default=0.0)
 
 
-def minutes(m):
-    return m / config.WALK_SPEED / 60.0
+def minutes(m, speed=None):
+    return m / (speed or config.WALK_SPEED) / 60.0

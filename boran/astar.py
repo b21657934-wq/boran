@@ -4,14 +4,25 @@ from . import config
 from .geo import haversine
 
 
-def edge_cost(ed, risk, wind_k, alpha=config.ALPHA_RISK, beta=config.BETA_WIND):
-    penalty = alpha * risk + (beta * wind_k if ed["mask"] & 2 else 0.0)
+def edge_cost(ed, risk, wind_k, alpha=config.ALPHA_RISK, beta=config.BETA_WIND, prof=None):
+    k = prof["risk"] if prof else 1.0
+    penalty = alpha * risk * k + (beta * wind_k if ed["mask"] & 2 else 0.0)
     if ed["warm"]:
         penalty *= 1.0 - config.WARM_RELIEF
-    return ed["len"] * (1.0 + penalty)
+    c = ed["len"] * (1.0 + penalty)
+    if prof:
+        if ed["hw"] == "steps":
+            c *= prof["steps"] or 1.0
+        elif ed["hw"] in config.ROUGH:
+            c *= prof["rough"]
+    return c
 
 
-def search(city, start, goal, risks, wind_k, safe=True, allow=None, weight=None, allow_dir=None):
+def blocked(ed, prof):
+    return bool(prof) and prof["steps"] is None and ed["hw"] == "steps"
+
+
+def search(city, start, goal, risks, wind_k, safe=True, allow=None, weight=None, allow_dir=None, prof=None):
     nodes = city.nodes
     glon, glat = nodes[goal]
     h = lambda n: haversine(nodes[n][0], nodes[n][1], glon, glat)
@@ -37,7 +48,9 @@ def search(city, start, goal, risks, wind_k, safe=True, allow=None, weight=None,
                 continue
             if allow_dir is not None and not allow_dir(ed, u):
                 continue
-            c = edge_cost(ed, risks[ei], wind_k) if safe else ed["len"] * (weight(ed) if weight else 1.0)
+            if prof is not None and blocked(ed, prof):
+                continue
+            c = edge_cost(ed, risks[ei], wind_k, prof=prof) if safe else ed["len"] * (weight(ed) if weight else 1.0)
             ng = g[u] + c
             if ng < g.get(v, float("inf")):
                 g[v] = ng
@@ -56,7 +69,8 @@ def search(city, start, goal, risks, wind_k, safe=True, allow=None, weight=None,
     return {"nodes": path_nodes, "edges": path_edges, "cost": g[goal], "order": order}
 
 
-def describe(city, res, risks, wind_k):
+def describe(city, res, risks, wind_k, speed=None):
+    speed = speed or config.WALK_SPEED
     line = []
     length = 0.0
     seconds = 0.0
@@ -72,7 +86,7 @@ def describe(city, res, risks, wind_k):
         line.extend(pts if not line else pts[1:])
         r = risks[ei]
         length += ed["len"]
-        seconds += ed["len"] / config.WALK_SPEED * (1.0 + 0.15 * r)
+        seconds += ed["len"] / speed * (1.0 + 0.15 * r)
         no_slip *= (1.0 - 0.005 * r) ** (ed["len"] / 100.0)
         if ed["mask"] & 2:
             exposed += ed["len"]

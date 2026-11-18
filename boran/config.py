@@ -26,3 +26,11 @@ TRANSIT_THRESHOLD_M = 2500.0
 ALPHA_RISK = 4.0
 BETA_WIND = 1.5
 WARM_RELIEF = 0.5
+
+PROFILES = {
+    "base": {"speed": 1.4, "risk": 1.0, "steps": 1.0, "rough": 1.0, "fall": 1.0},
+    "elder": {"speed": 1.0, "risk": 2.2, "steps": 4.0, "rough": 1.6, "fall": 2.5},
+    "stroller": {"speed": 1.15, "risk": 1.5, "steps": None, "rough": 2.5, "fall": 1.5},
+    "wheel": {"speed": 0.9, "risk": 2.6, "steps": None, "rough": 4.0, "fall": 1.8},
+}
+ROUGH = {"track", "path"}
