@@ -22,6 +22,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install requests osmium
+      - run: curl -4 -fL --retry 5 --retry-delay 10 -o /tmp/kazakhstan.osm.pbf https://download.geofabrik.de/asia/kazakhstan-latest.osm.pbf
       - run: python tools/build_data.py /tmp/kazakhstan.osm.pbf
       - run: python tools/build_night.py
       - name: Commit data
