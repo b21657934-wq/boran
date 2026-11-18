@@ -2,6 +2,7 @@ import hashlib
 import json
 import os
 import shutil
+import time
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -10,10 +11,10 @@ import importlib
 import glob
 
 import boran
-from boran import config, graph, pipeline, weather
+from boran import config, graph, pipeline, reports, weather
 
 _BORAN_DIR = os.path.dirname(os.path.abspath(boran.__file__))
-_RELOAD_ORDER = ["geo", "config", "hmm", "bayes", "astar", "search", "mdp", "nav", "weather", "demo", "graph", "pipeline"]
+_RELOAD_ORDER = ["geo", "config", "hmm", "bayes", "astar", "search", "mdp", "nav", "reports", "weather", "demo", "graph", "pipeline"]
 
 
 def code_signature():
@@ -94,14 +95,28 @@ def analyse(name, stamp, signature):
     return pipeline.analyse(load_city(signature)[0], load_weather(name))
 
 
+@st.cache_resource(show_spinner=False, max_entries=2)
+def report_store(signature):
+    c = load_city(signature)[0]
+    pts = [(s["lon"], s["lat"]) for s in c.stops] + [(p["lon"], p["lat"]) for p in config.PLACES]
+    avoid = [(p["lon"], p["lat"]) for p in config.PLACES if p["id"] in ("dorm", "campus")]
+    return reports.Store(c, pts, avoid=avoid)
+
+
+@st.cache_data(ttl=600, show_spinner=False, max_entries=8)
+def analyse_live(name, stamp, signature, rkey):
+    an = analyse(name, stamp, signature)
+    return dict(an, risks=report_store(signature).overlay(an["risks"], time.time()))
+
+
 @st.cache_data(ttl=600, show_spinner=False, max_entries=32)
-def find_compare(name, stamp, signature, src, dst):
-    return pipeline.compare(load_city(signature)[0], analyse(name, stamp, signature), src, dst)
+def find_compare(name, stamp, signature, rkey, src, dst):
+    return pipeline.compare(load_city(signature)[0], analyse_live(name, stamp, signature, rkey), src, dst)
 
 
 @st.cache_data(ttl=600, show_spinner=False, max_entries=64)
-def find_route(name, stamp, signature, src, dst):
-    return pipeline.route(load_city(signature)[0], analyse(name, stamp, signature), load_weather(name), src, dst)
+def find_route(name, stamp, signature, rkey, src, dst):
+    return pipeline.route(load_city(signature)[0], analyse_live(name, stamp, signature, rkey), load_weather(name), src, dst)
 
 
 loading = st.empty()
@@ -121,12 +136,28 @@ stamp = f'{wx["date"]}{wx["now"]["time"]}{wx["source"]}'
 sig = data_signature()
 an = analyse(scenario, stamp, sig)
 
+store = report_store(sig)
+for r in (state.get("rep") or [])[-30:]:
+    try:
+        store.add(str(r["id"])[:48], r["k"], float(r["lon"]), float(r["lat"]), r.get("pred"), r.get("risk"), bool(r.get("city")),
+                  edges=r.get("edges") if r.get("city") else None)
+    except (KeyError, TypeError, ValueError):
+        pass
+rkey = f"{store.version}-{int(time.time() // 600)}"
+wx_live = load_weather("live")
+an_live = analyse("live", f'{wx_live["date"]}{wx_live["now"]["time"]}{wx_live["source"]}', sig)
+reports_inline = None
+try:
+    store.publish(FRONTEND, an_live["risks"], time.time())
+except OSError:
+    reports_inline = store.export(an_live["risks"], time.time())
+
 route = None
 error = None
 src, dst = state.get("src"), state.get("dst")
 if src and dst:
     try:
-        route = find_route(scenario, stamp, sig, (round(src[0], 5), round(src[1], 5)), (round(dst[0], 5), round(dst[1], 5)))
+        route = find_route(scenario, stamp, sig, rkey, (round(src[0], 5), round(src[1], 5)), (round(dst[0], 5), round(dst[1], 5)))
         if route is None:
             error = "no_path"
     except Exception as exc:
@@ -135,7 +166,7 @@ if src and dst:
 compare = None
 if src and dst and state.get("cmp"):
     try:
-        compare = find_compare(scenario, stamp, sig, (round(src[0], 5), round(src[1], 5)), (round(dst[0], 5), round(dst[1], 5)))
+        compare = find_compare(scenario, stamp, sig, rkey, (round(src[0], 5), round(src[1], 5)), (round(dst[0], 5), round(dst[1], 5)))
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
 
@@ -153,6 +184,8 @@ payload = {
     "error": error,
     "compare": compare,
     "ack": state.get("n", 0),
+    "reportsV": store.version,
+    "reportsInline": reports_inline,
     "cityVersion": version,
     "city": inline_city,
     "params": {"alpha": config.ALPHA_RISK, "beta": config.BETA_WIND, "threshold": config.TRANSIT_THRESHOLD_M},

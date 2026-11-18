@@ -5,3 +5,5 @@ __pycache__/
 boran/frontend/city.json
 .venv/
 boran/frontend/tiles/
+boran/frontend/reports.json
+boran/frontend/reports.json.*.tmp

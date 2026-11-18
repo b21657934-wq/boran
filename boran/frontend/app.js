@@ -14,7 +14,7 @@
     args: null, city: null, cityVersion: null, lang: store.get('boran.lang', 'ru'), themeForce: store.get('boran.theme', null),
     src: null, dst: null, picking: null, markMode: false, n: 0, pendingRoute: false,
     routeKey: null, routeT0: 0, waveT0: 0, view: null, riskTable: null, tiles: new Map(), tileReq: new Map(), tileShown: '',
-    marks: store.get('boran.marks', []), splashDone: false, introDone: false, t0: performance.now(),
+    reps: null, repsAt: 0, repsV: -1, pendingReps: [], marksTab: 'city', splashDone: false, introDone: false, t0: performance.now(),
   };
   const t = (k, vars) => { let s = (window.I18N[S.lang] || window.I18N.ru)[k]; if (s == null) s = window.I18N.ru[k] ?? k; if (vars) for (const a in vars) s = s.split('{' + a + '}').join(vars[a]); return s; };
   const num = (v, d = 0) => Number(v).toFixed(d).replace('-', '−');
@@ -27,7 +27,7 @@
     S.n += 1;
     post('streamlit:setComponentValue', {
       dataType: 'json',
-      value: { n: S.n, scenario: S.scenario || 'live', src: S.wantRoute && S.src ? [S.src.lon, S.src.lat] : null, dst: S.wantRoute && S.dst ? [S.dst.lon, S.dst.lat] : null, cmp: !!(S.wantCompare && S.wantRoute) },
+      value: { n: S.n, rep: S.pendingReps.slice(-20), scenario: S.scenario || 'live', src: S.wantRoute && S.src ? [S.src.lon, S.src.lat] : null, dst: S.wantRoute && S.dst ? [S.dst.lon, S.dst.lat] : null, cmp: !!(S.wantCompare && S.wantRoute) },
     });
   }
   window.addEventListener('message', (e) => { if (e.data && e.data.type === 'streamlit:render') onRender(e.data.args.payload); });
@@ -75,7 +75,9 @@
       const same = args.compare.src[0].toFixed(4) === S.src.lon.toFixed(4) && args.compare.dst[0].toFixed(4) === S.dst.lon.toFixed(4);
       if (same && S.cmp !== args.compare) { S.cmp = args.compare; S.cmpPending = false; if (!$('algos').hidden) { renderAlgos(); pushCompare(); fitCompare(); } }
     }
-    if (first) startSplash();
+    if (args.reportsInline) applyReports(args.reportsInline);
+    else if (args.reportsV !== S.repsV) fetchReports();
+    if (first) { startSplash(); setInterval(() => { if (document.visibilityState === 'visible') fetchReports(); }, 8000); }
   }
 
   const mix = (a, b, k) => a.map((v, i) => Math.round(v + (b[i] - v) * k));
@@ -426,6 +428,7 @@
       'b-runner': { type: 'geojson', data: FC() },
       'b-warm': { type: 'geojson', data: FC(S.city.warm.map((w) => ({ type: 'Feature', properties: { k: w.kind }, geometry: { type: 'Point', coordinates: [w.lon, w.lat] } }))) },
       'b-marks': { type: 'geojson', data: FC() },
+      'b-repseg': { type: 'geojson', data: FC() },
       'b-landmarks': { type: 'geojson', data: landmarkFeatures() },
       'b-cmp': { type: 'geojson', data: FC() },
       'b-cmp-wave': { type: 'geojson', data: FC() },
@@ -467,7 +470,18 @@
       { id: 'b-cmp', type: 'line', source: 'b-cmp', filter: ['==', ['get', 'sel'], 1], layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: { 'line-color': ['get', 'c'], 'line-opacity': ['case', ['==', ['get', 'sel'], 1], 1, 0.45], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, ['case', ['==', ['get', 'sel'], 1], 4, 2], 17, ['case', ['==', ['get', 'sel'], 1], 9, 3.5]] } },
       { id: 'b-runner', type: 'circle', source: 'b-runner', paint: { 'circle-radius': 6, 'circle-color': '#FFFFFF', 'circle-stroke-color': P.route, 'circle-stroke-width': 3, 'circle-pitch-alignment': 'map' } },
-      { id: 'b-marks', type: 'circle', source: 'b-marks', paint: { 'circle-radius': 6, 'circle-color': ['match', ['get', 'a'], 'ice', P.risk[2], 'packed', P.risk[1], P.ok], 'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 1.5 } },
+      { id: 'b-repseg-glow', type: 'line', source: 'b-repseg', layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': ['case', ['==', ['get', 'k'], 'dry'], P.ok, P.risk[2]], 'line-blur': 5, 'line-opacity': 0.45, 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 6, 17, 22] } },
+      { id: 'b-repseg', type: 'line', source: 'b-repseg', layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': ['case', ['==', ['get', 'k'], 'dry'], P.ok, ['interpolate', ['linear'], ['get', 'p'], 0.3, P.risk[1], 0.75, P.risk[2]]], 'line-width': ['interpolate', ['linear'], ['zoom'], 12, 2.5, 17, 7] } },
+      { id: 'b-marks-halo', type: 'circle', source: 'b-marks', filter: ['==', ['get', 'fresh'], 1],
+        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 10, 17, 26], 'circle-color': ['match', ['get', 'k'], 'ice', P.risk[2], 'packed', P.risk[1], P.ok], 'circle-opacity': 0.22, 'circle-pitch-alignment': 'map' } },
+      { id: 'b-marks', type: 'circle', source: 'b-marks',
+        paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 11, ['+', 3, ['min', ['get', 'n'], 4]], 17, ['+', 8, ['*', 2, ['min', ['get', 'n'], 4]]]],
+          'circle-color': ['match', ['get', 'k'], 'ice', P.risk[2], 'packed', P.risk[1], P.ok], 'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 2, 'circle-pitch-alignment': 'map' } },
+      { id: 'b-marks-label', type: 'symbol', source: 'b-marks', minzoom: 14.5,
+        layout: { 'text-field': ['get', 'lbl'], 'text-font': ['Noto Sans Bold'], 'text-size': 12, 'text-offset': [0, 1.5], 'text-anchor': 'top', 'text-allow-overlap': false },
+        paint: { 'text-color': isNight() ? '#EAF2FF' : '#1B2333', 'text-halo-color': isNight() ? 'rgba(8,12,24,.9)' : 'rgba(255,255,255,.95)', 'text-halo-width': 1.6 } },
     ];
     st.layers.splice(before, 0, ...below);
     const ext = st.layers.findIndex((L) => L.type === 'fill-extrusion');
@@ -499,7 +513,7 @@
     S.styleTry = (S.styleTry || 0) + 1;
     const attempt = S.styleTry;
     map.setStyle(full, { diff: false });
-    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; S.tileShown = ''; refreshTiles(); loadHeat(); pushRoute(true); pushMarks(); pushCompare(); });
+    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; S.tileShown = ''; refreshTiles(); loadHeat(); pushRoute(true); pushReports(); pushCompare(); });
     setTimeout(() => {
       if (attempt !== S.styleTry || (map.getStyle() && map.getLayer('b-risk'))) return;
       if (attempt > 3) return;
@@ -568,7 +582,41 @@
     if (map.getLayer('b-risk-glow')) map.setFilter('b-risk-glow', glowFilter());
     setPaint('b-heat', 'heatmap-weight', heatWeight());
   }
-  function pushMarks() { const s = src('b-marks'); if (s) s.setData(FC(S.marks.map((m) => ({ type: 'Feature', properties: { a: m.actual }, geometry: { type: 'Point', coordinates: [m.lon, m.lat] } })))); }
+  function repAge(ts) { const d = S.reps ? S.reps.now - ts + (Date.now() / 1000 - S.repsAt) : 0; return Math.max(0, d); }
+  function agoText(sec) { const m = Math.round(sec / 60); return m < 2 ? t('r_now') : m < 60 ? t('r_min', { m }) : t('r_h', { h: Math.round(m / 60) }); }
+  function pushReports() {
+    const pts = src('b-marks'), seg = src('b-repseg');
+    if (!pts || !seg) return;
+    const groups = new Map();
+    (S.reps ? S.reps.reports : []).forEach((r) => { const g = groups.get(r[7]) || []; g.push(r); groups.set(r[7], g); });
+    const feats = [];
+    groups.forEach((g) => {
+      g.sort((a, b) => a[4] - b[4]); const last = g[g.length - 1], age = repAge(last[4]);
+      const who = last[5] ? t('r_city') : g.length > 1 ? t('r_people', { n: g.length }) : '';
+      feats.push({ type: 'Feature', properties: { k: last[1], n: g.length, fresh: age < 900 ? 1 : 0, lbl: t('r_' + last[1]) + ' · ' + agoText(age) + (who ? ' · ' + who : '') }, geometry: { type: 'Point', coordinates: [last[2], last[3]] } });
+    });
+    S.pendingReps.forEach((r) => feats.push({ type: 'Feature', properties: { k: r.k, n: 1, fresh: 1, lbl: t('r_' + r.k) + ' · ' + t('r_now') }, geometry: { type: 'Point', coordinates: [r.lon, r.lat] } }));
+    pts.setData(FC(feats));
+    seg.setData(FC((S.reps ? S.reps.segs : []).map((g) => ({ type: 'Feature', properties: { p: g.p, k: g.k }, geometry: { type: 'LineString', coordinates: g.line } }))));
+  }
+  function applyReports(d) {
+    if (!d || typeof d.v !== 'number') return;
+    S.reps = d; S.repsAt = Date.now() / 1000; S.repsV = d.v;
+    const seen = new Set(d.reports.map((r) => r[0]));
+    S.pendingReps = S.pendingReps.filter((r) => !seen.has(r.id) && Date.now() - r.at < 60000);
+    pushReports();
+    if (!$('marks').hidden) renderMarks();
+  }
+  let repReq = null;
+  function fetchReports() {
+    if (repReq || !map) return;
+    repReq = fetch('reports.json?t=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then(applyReports).catch(() => {}).finally(() => { repReq = null; });
+  }
+  function addReport(k, lon, lat, extra) {
+    const r = Object.assign({ id: 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), k, lon: +lon.toFixed(6), lat: +lat.toFixed(6), at: Date.now() }, extra || {});
+    S.pendingReps.push(r); pushReports(); send();
+    return r;
+  }
 
   function lineLen(line) { let a = 0; for (let i = 1; i < line.length; i++) a += Math.hypot((line[i][0] - line[i - 1][0]) * 0.63, line[i][1] - line[i - 1][1]); return a; }
   function pointAt(line, t) {
@@ -839,17 +887,52 @@
   }
 
   function renderMarks() {
-    const body = $('marks-body'), M = S.marks, cls = ['ice', 'packed', 'dry'];
-    if (!M.length) { body.innerHTML = '<p class="empty">' + t('m_none') + '</p>'; return; }
-    const hit = M.filter((m) => m.actual === m.pred).length;
-    let cm = '<table class="cm"><tr><th>' + t('m_pred') + '</th>' + cls.map((c) => '<th>' + t('m_' + c) + '</th>').join('') + '</tr>';
-    cls.forEach((p) => { cm += '<tr><th>' + t('m_' + p) + '</th>' + cls.map((c) => '<td class="' + (p === c ? 'd' : '') + '">' + M.filter((m) => m.pred === p && m.actual === c).length + '</td>').join('') + '</tr>'; });
-    body.innerHTML = '<div class="acc"><div><b>' + M.length + '</b><small>' + t('m_n') + '</small></div><div><b>' + Math.round((hit / M.length) * 100) + '%</b><small>' + t('m_match') + '</small></div></div>' + cm + '</table><div style="display:flex;gap:8px;margin-top:12px"><button class="btn2" id="m-csv">' + t('m_csv') + '</button><button class="btn2" id="m-clear">' + t('m_clear') + '</button></div><p class="assume">≥ 0.50 → ' + t('m_ice') + ' · 0.25–0.50 → ' + t('m_packed') + ' · &lt; 0.25 → ' + t('m_dry') + '</p>';
-    $('m-csv').onclick = () => {
-      const rows = ['time,lon,lat,actual,predicted,risk,scenario'].concat(M.map((m) => [m.t, m.lon, m.lat, m.actual, m.pred, m.risk, m.scenario].join(',')));
+    const body = $('marks-body'), R = S.reps;
+    const n = R ? R.reports.length : 0;
+    const tabs = '<div class="mk-tabs" role="tablist"><button role="tab" data-t="city" aria-selected="' + (S.marksTab === 'city') + '">' + t('r_tab_city') + '</button><button role="tab" data-t="acc" aria-selected="' + (S.marksTab === 'acc') + '">' + t('m_open') + '</button></div>';
+    const head = '<p class="mk-lead">' + t('r_lead', { n }) + '</p>';
+    let html = '';
+    if (S.marksTab === 'city') {
+      const top = R ? R.top : [];
+      if (!top.length) html = '<p class="empty">' + t('r_none') + '</p>';
+      else {
+        html = '<p class="assume">' + t('r_city_how') + '</p><ol class="rq">' + top.map((q, i) => {
+          const name = q.name ? q.name : t('r_noname');
+          const where = q.near ? '<small>' + t('r_near') + '</small>' : '';
+          const marks = q.n ? t('r_marks', { n: q.n }) + (q.last ? ' · ' + agoText(repAge(q.last)) : '') : t('r_forecast');
+          const ok = q.sanded;
+          return '<li class="' + (ok ? 'ok' : '') + '"><b class="rq-i">' + (i + 1) + '</b><div class="rq-m"><div class="rq-t">' + name + ' ' + where + '</div>'
+            + '<div class="rq-s">≈ ' + q.len + ' м · ' + t('r_ice_p', { p: Math.round(q.p * 100) }) + ' · ' + t('r_flow_' + q.flow) + '</div>'
+            + '<div class="rq-s">' + (ok ? t('r_sanded') + ' · ' : '') + marks + '</div></div>'
+            + '<div class="rq-a"><button class="btn2 rq-go" data-i="' + i + '">' + t('r_show') + '</button>' + (ok ? '' : '<button class="btn2 rq-ok" data-i="' + i + '">' + t('r_did') + '</button>') + '</div></li>';
+        }).join('') + '</ol>';
+      }
+      const done = (R && R.done) || [];
+      if (done.length) html += '<h4 class="mk-sub">' + t('r_done_h') + '</h4><ol class="rq">' + done.map((q) => '<li class="ok"><b class="rq-i">✓</b><div class="rq-m"><div class="rq-t">' + (q.name || t('r_noname')) + (q.near ? ' <small>' + t('r_near') + '</small>' : '') + '</div><div class="rq-s">' + t('r_sanded') + ' · ' + agoText(repAge(q.last)) + (q.city ? ' · ' + t('r_city') : '') + '</div></div></li>').join('') + '</ol>';
+    } else {
+      const M = R ? R.reports.filter((r) => !r[5] && r[6]).map((r) => ({ actual: r[1], pred: r[6] })) : [], cls = ['ice', 'packed', 'dry'];
+      if (!M.length) html = '<p class="empty">' + t('m_none') + '</p>';
+      else {
+        const hit = M.filter((m) => m.actual === m.pred).length;
+        let cm = '<table class="cm"><tr><th>' + t('m_pred') + '</th>' + cls.map((c) => '<th>' + t('m_' + c) + '</th>').join('') + '</tr>';
+        cls.forEach((p) => { cm += '<tr><th>' + t('m_' + p) + '</th>' + cls.map((c) => '<td class="' + (p === c ? 'd' : '') + '">' + M.filter((m) => m.pred === p && m.actual === c).length + '</td>').join('') + '</tr>'; });
+        html = '<div class="acc"><div><b>' + M.length + '</b><small>' + t('m_n') + '</small></div><div><b>' + Math.round((hit / M.length) * 100) + '%</b><small>' + t('m_match') + '</small></div></div>' + cm + '</table><div style="display:flex;gap:8px;margin-top:12px"><button class="btn2" id="m-csv">' + t('m_csv') + '</button></div><p class="assume">≥ 0.50 → ' + t('m_ice') + ' · 0.25–0.50 → ' + t('m_packed') + ' · &lt; 0.25 → ' + t('m_dry') + '</p>';
+      }
+    }
+    body.innerHTML = tabs + head + html;
+    body.querySelectorAll('.mk-tabs button').forEach((b) => { b.onclick = () => { S.marksTab = b.dataset.t; renderMarks(); }; });
+    body.querySelectorAll('.rq-go').forEach((b) => { b.onclick = () => {
+      const q = R.top[+b.dataset.i]; map.flyTo({ center: [q.lon, q.lat], zoom: 17, pitch: 55, duration: 1800, essential: true });
+      if (window.innerWidth <= 760) $('marks').hidden = true;
+    }; });
+    body.querySelectorAll('.rq-ok').forEach((b) => { b.onclick = () => {
+      const q = R.top[+b.dataset.i]; addReport('dry', q.lon, q.lat, { city: true, edges: q.edges }); R.top.splice(+b.dataset.i, 1); R.done = [{ name: q.name, near: q.near, len: q.len, last: R.now + (Date.now() / 1000 - S.repsAt), city: true }].concat(R.done || []); toast(t('r_done')); renderMarks();
+    }; });
+    const csv = $('m-csv');
+    if (csv) csv.onclick = () => {
+      const rows = ['time,lon,lat,mark,forecast,by_city'].concat(R.reports.map((r) => [new Date(r[4] * 1000).toISOString(), r[2], r[3], r[1], r[6], r[5]].join(',')));
       const a = el('a'); a.href = URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv' })); a.download = 'boran_marks.csv'; a.click();
     };
-    $('m-clear').onclick = () => { S.marks = []; store.set('boran.marks', []); renderMarks(); pushMarks(); };
   }
 
   let toastTimer = null;
@@ -869,13 +952,13 @@
       const pop = $('mark-pop');
       pop.style.left = info.x + 'px'; pop.style.top = info.y + 'px';
       const col = { ice: 'var(--bad)', packed: 'var(--warn)', dry: 'var(--ok)' };
-      pop.innerHTML = ['ice', 'packed', 'dry'].map((c) => '<button data-c="' + c + '"><i style="background:' + col[c] + '"></i>' + t('m_' + c) + '</button>').join('');
+      pop.innerHTML = ['ice', 'packed', 'dry'].map((c) => '<button data-c="' + c + '"><i style="background:' + col[c] + '"></i>' + t('r_' + c) + '</button>').join('');
       pop.hidden = false;
       pop.querySelectorAll('button').forEach((b) => { b.onclick = async () => {
+        pop.hidden = true;
         const pr = await predictAt(lon, lat);
-        S.marks.push({ t: new Date().toISOString(), lon: +lon.toFixed(5), lat: +lat.toFixed(5), actual: b.dataset.c, pred: pr.pred, risk: +pr.risk.toFixed(2), scenario: S.args.scenario });
-        store.set('boran.marks', S.marks); pop.hidden = true; toast(t('m_saved')); pushMarks();
-        if (!$('marks').hidden) renderMarks();
+        addReport(b.dataset.c, lon, lat, { pred: pr.pred, risk: +pr.risk.toFixed(2) });
+        toast(t('r_sent'));
       }; });
     }
   }
@@ -1201,7 +1284,7 @@
     renderAll();
   };
   $('btn-ice').onclick = () => {
-    S.markMode = !S.markMode; $('btn-ice').setAttribute('aria-pressed', String(S.markMode)); $('mark-pop').hidden = true;
+    S.markMode = !S.markMode; $('btn-ice').setAttribute('aria-pressed', String(S.markMode)); $('mark-pop').hidden = true; document.body.classList.toggle('markmode', S.markMode);
     if (S.markMode) { $('brain').hidden = true; closeAlgos(); $('marks').hidden = false; renderMarks(); toast(t('m_hint')); $('panel').classList.add('min'); } else { $('marks').hidden = true; toast(t('m_off')); }
   };
   $('btn-scn').onclick = (ev) => {
