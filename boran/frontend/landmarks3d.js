@@ -271,8 +271,10 @@ void main(){
         const m = ctx.map();
         if (!m || !m.isStyleLoaded() || m.getLayer('b-monuments')) return;
         const layers = m.getStyle().layers;
-        const sym = layers.find((L) => L.type === 'symbol' && !/^b-/.test(L.id));
-        try { m.addLayer(layer, sym ? sym.id : undefined); } catch (e) { }
+        let last = -1;
+        layers.forEach((L, k) => { if (/^b-/.test(L.id)) last = k; });
+        const next = layers[last + 1];
+        try { m.addLayer(layer, next ? next.id : undefined); } catch (e) { }
       },
     };
   }

@@ -1172,7 +1172,7 @@
     if (btn && btn.dataset.th !== theme()) { btn.dataset.th = theme(); btn.innerHTML = ico[theme()]; btn.title = t('theme_' + theme()); }
   }
   let NAV = null, NIGHT = null, HALL = null, WIND = null, LM = null;
-  const MONUMENT_IDS = [2304016452, 2304016442, 14618133342, 4607037782, 4607037772, 5079534652, 5079534722, 4607037792];
+  const MONUMENT_IDS = [2304016452, 2304016442, 14618133342, 4607037782, 4607037772, 5079534652, 5079534722, 4607037792, 5079534680];
   function forceNight(on) { if (!!S.nightForce === !!on) return; S.nightForce = !!on; themeBody(); applyStyle(); }
   function hideExtras(on, which) {
     S.nightHide = on ? (which instanceof RegExp ? which : which ? /^b-(warm|marks|repseg|points|route|short|ride|runner|wave|cmp|heat)/ : /^b-(warm|marks|repseg|points|route|short|ride|runner|wave|cmp)/) : null;
