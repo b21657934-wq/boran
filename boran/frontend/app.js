@@ -240,7 +240,7 @@
         p['fill-extrusion-vertical-gradient'] = true;
         L.minzoom = 12.6;
         p['fill-extrusion-opacity'] = ['interpolate', ['linear'], ['zoom'], 12.6, 0, 13.4, 1];
-        const tall = ['>=', ['coalesce', ['get', 'render_height'], 0], 48], f0 = ['all', ...(L.filter ? [L.filter] : []), ['>', ['distance', { type: 'Point', coordinates: [71.41613, 51.08893] }], 24]];
+        const tall = ['>=', ['coalesce', ['get', 'render_height'], 0], 48], f0 = ['all', ...(L.filter ? [L.filter] : []), ['!', ['in', ['id'], ['literal', MONUMENT_IDS]]]];
         L.filter = f0 ? ['all', f0, ['!', tall]] : ['!', tall];
         out.push(L);
         const T = JSON.parse(JSON.stringify(L));
@@ -287,36 +287,7 @@
     for (let i = 0; i <= n; i++) { const a = (i / n) * Math.PI * 2; ring.push([lon + Math.cos(a) * r * kx, lat + Math.sin(a) * r * ky]); }
     return [ring];
   }
-  function landmarkFeatures() {
-    const f = [];
-    const add = (lon, lat, r, base, h, color) => f.push({ type: 'Feature', properties: { base, h, color }, geometry: { type: 'Polygon', coordinates: circlePoly(lon, lat, r) } });
-    const bx = 71.43048, by = 51.12827;
-    add(bx, by, 7, 0, 3, '#D9D4CB');
-    for (let i = 0; i < 6; i++) add(bx, by, 3.2 - i * 0.1, 3 + i * 11, 3 + (i + 1) * 11, '#F7F7F4');
-    const R = 11, c = 86;
-    for (let k = 0; k < 10; k++) {
-      const z0 = c - R + (k * 2 * R) / 10, z1 = z0 + (2 * R) / 10, zm = (z0 + z1) / 2;
-      add(bx, by, Math.max(1.5, Math.sqrt(Math.max(0, R * R - (zm - c) ** 2))), z0, z1, '#E9B93A');
-    }
-    add(bx, by, 2.2, 63, 75, '#F7F7F4');
-    const nl = isNight(), ex = 71.41613, ey = 51.08893;
-    add(ex, ey, 24, 0, 12, nl ? '#25324A' : '#D7DEE6');
-    add(ex, ey, 13, 12, 22, nl ? '#2E3E5C' : '#C4CFDA');
-    const SR = 40, SC = 60, BANDS = 32, SECT = 24, k0 = 111320 * Math.cos(ey * Math.PI / 180);
-    const glassA = nl ? '#3E63B0' : '#A7C6DE', glassB = nl ? '#5577C8' : '#BBD5E8', frame = nl ? '#9B8CFF' : '#7F9DB9';
-    for (let k = 0; k < BANDS; k++) {
-      const z0 = SC - SR + (k * 2 * SR) / BANDS, z1 = z0 + (2 * SR) / BANDS, zm = (z0 + z1) / 2;
-      const r = Math.max(2, Math.sqrt(Math.max(0, SR * SR - (zm - SC) ** 2)));
-      for (let j = 0; j < SECT; j++) {
-        const a0 = (j / SECT) * Math.PI * 2, a1 = ((j + 1) / SECT) * Math.PI * 2, ring = [[ex, ey]];
-        for (let q = 0; q <= 3; q++) { const a = a0 + ((a1 - a0) * q) / 3; ring.push([ex + (Math.cos(a) * r) / k0, ey + (Math.sin(a) * r) / 110540]); }
-        ring.push([ex, ey]);
-        const col = k % 4 === 0 ? frame : (j + (k >> 2)) % 2 ? glassA : glassB;
-        f.push({ type: 'Feature', properties: { base: z0, h: z1, color: col }, geometry: { type: 'Polygon', coordinates: [ring] } });
-      }
-    }
-    return FC(f);
-  }
+  function landmarkFeatures() { return FC([]); }
 
   const TILE_Z = 12.5, DETAIL_Z = 14.4;
   function tileFeats(arr) {
@@ -564,6 +535,7 @@
         });
         return m2;
       } });
+    if (!LM && window.BoranLandmarks) LM = window.BoranLandmarks.create({ map: () => map, isNight });
     if (!WIND && window.BoranWind) WIND = window.BoranWind.create({ map: () => map, isNight,
       weather: () => S.windWx || (S.args && S.args.weather && S.args.weather.now), strength: () => (S.windK == null ? 1 : S.windK) });
     if (!HALL && window.BoranHall) HALL = window.BoranHall.create({ map: () => map, t, toast, hideExtras, forceNight, setWind: (k) => { S.windK = k; },
@@ -717,7 +689,10 @@
   function frame(now) {
     requestAnimationFrame(frame);
     if (!map || !S.city || !S.args || document.hidden) return;
-    if (WIND && (S.windTick = (S.windTick || 0) + 1) % 20 === 0 && !map.getLayer('b-wind') && map.isStyleLoaded()) WIND.attach();
+    if ((S.windTick = (S.windTick || 0) + 1) % 20 === 0 && map.isStyleLoaded()) {
+      if (LM && !map.getLayer('b-monuments')) LM.attach();
+      if (WIND && !map.getLayer('b-wind')) WIND.attach();
+    }
     if (now - (S.lastAnim || 0) > 33) { S.lastAnim = now; animate(now); animateCompare(now); }
     drawSnow(now);
   }
@@ -1196,7 +1171,8 @@
     const btn = $('btn-theme');
     if (btn && btn.dataset.th !== theme()) { btn.dataset.th = theme(); btn.innerHTML = ico[theme()]; btn.title = t('theme_' + theme()); }
   }
-  let NAV = null, NIGHT = null, HALL = null, WIND = null;
+  let NAV = null, NIGHT = null, HALL = null, WIND = null, LM = null;
+  const MONUMENT_IDS = [2304016452, 2304016442, 14618133342, 4607037782, 4607037772, 5079534652, 5079534722, 4607037792];
   function forceNight(on) { if (!!S.nightForce === !!on) return; S.nightForce = !!on; themeBody(); applyStyle(); }
   function hideExtras(on, which) {
     S.nightHide = on ? (which instanceof RegExp ? which : which ? /^b-(warm|marks|repseg|points|route|short|ride|runner|wave|cmp|heat)/ : /^b-(warm|marks|repseg|points|route|short|ride|runner|wave|cmp)/) : null;
