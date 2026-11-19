@@ -20,7 +20,7 @@
   const t = (k, vars) => { let s = (window.I18N[S.lang] || window.I18N.ru)[k]; if (s == null) s = window.I18N.ru[k] ?? k; if (vars) for (const a in vars) s = s.split('{' + a + '}').join(vars[a]); return s; };
   const num = (v, d = 0) => Number(v).toFixed(d).replace('-', '−');
   const THEMES = ['city', 'game', 'night'];
-  const theme = () => (S.nightForce ? 'night' : THEMES.includes(S.themeForce) ? S.themeForce : (new Date().getHours() >= 18 || new Date().getHours() < 7 ? 'night' : 'city'));
+  const theme = () => (S.nightForce ? 'night' : THEMES.includes(S.themeForce) ? S.themeForce : 'night');
   const isNight = () => theme() === 'night';
 
   function post(type, extra) { window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, extra), '*'); }
@@ -549,9 +549,9 @@
     NAV = window.BoranNav ? window.BoranNav.create({ map, t, isNight, lang: () => S.lang, onStart: navStart, onExit: navExit, roadsNear, onShare: () => openShare('arrived') }) : null;
     if (!NIGHT && window.BoranNight) NIGHT = window.BoranNight.create({ map: () => map, t, version: () => S.args && S.args.nightV,
       setRisk: (tb) => { S.nightRisk = tb; S.riskTable = tb || (S.args && S.args.riskTable); pushRisk(); },
-      onOpen: () => { if (HALL) HALL.close(); $('brain').hidden = true; $('marks').hidden = true; closeAlgos(); $('panel').classList.add('min'); $('btn-night').setAttribute('aria-pressed', 'true'); },
+      onOpen: () => { if (NAV && NAV.active()) NAV.stop(); if (HALL) HALL.close(); $('brain').hidden = true; $('marks').hidden = true; closeAlgos(); $('panel').classList.add('min'); $('btn-night').setAttribute('aria-pressed', 'true'); },
       onClose: () => { $('btn-night').setAttribute('aria-pressed', 'false'); },
-      forceNight, hideExtras,
+      forceNight, hideExtras, setWind: (k) => { S.windK = k; },
       makeTwin: (box) => {
         const st = map.getStyle();
         st.layers = st.layers.filter((l) => !/^(b-|nt-|n-)/.test(l.id) || l.id.startsWith('b-landmarks'));
@@ -564,10 +564,12 @@
         });
         return m2;
       } });
-    if (!HALL && window.BoranHall) HALL = window.BoranHall.create({ map: () => map, t, toast, hideExtras, forceNight,
+    if (!WIND && window.BoranWind) WIND = window.BoranWind.create({ map: () => map, isNight,
+      weather: () => S.windWx || (S.args && S.args.weather && S.args.weather.now), strength: () => (S.windK == null ? 1 : S.windK) });
+    if (!HALL && window.BoranHall) HALL = window.BoranHall.create({ map: () => map, t, toast, hideExtras, forceNight, setWind: (k) => { S.windK = k; },
       now: () => Date.now() / 1000 + (S.skew || 0),
       url: () => (S.args && S.args.hallUrl) || location.href,
-      onOpen: () => { if (NIGHT) NIGHT.close(); if (S.markMode) $('btn-ice').click(); $('brain').hidden = true; $('marks').hidden = true; closeAlgos(); $('btn-hall').setAttribute('aria-pressed', 'true'); },
+      onOpen: () => { if (NAV && NAV.active()) NAV.stop(); if (NIGHT) NIGHT.close(); if (S.markMode) $('btn-ice').click(); $('brain').hidden = true; $('marks').hidden = true; closeAlgos(); $('btn-hall').setAttribute('aria-pressed', 'true'); },
       onClose: () => { $('btn-hall').setAttribute('aria-pressed', 'false'); },
       fastReports: (on) => { S.repEvery = on ? 3000 : 8000; },
       mark: async (k, lon, lat) => { const pr = await predictAt(lon, lat); return addReport(k, lon, lat, { pred: pr.pred, risk: +pr.risk.toFixed(2) }).id; },
@@ -715,6 +717,7 @@
   function frame(now) {
     requestAnimationFrame(frame);
     if (!map || !S.city || !S.args || document.hidden) return;
+    if (WIND && (S.windTick = (S.windTick || 0) + 1) % 20 === 0 && !map.getLayer('b-wind') && map.isStyleLoaded()) WIND.attach();
     if (now - (S.lastAnim || 0) > 33) { S.lastAnim = now; animate(now); animateCompare(now); }
     drawSnow(now);
   }
@@ -830,6 +833,7 @@
     $('src-name').textContent = placeName(S.src); $('dst-name').textContent = placeName(S.dst);
     $('slot-src').classList.toggle('on', S.picking === 'src'); $('slot-dst').classList.toggle('on', S.picking === 'dst');
     if ($('sp-sub')) $('sp-sub').textContent = t('sp', { t: num(Math.round(now.temp)) });
+    if ($('sp-tag')) $('sp-tag').textContent = t('sp_tag');
     renderResult();
     applyStyle(); syncMarkers(); pushRoute(false);
     if (!$('brain').hidden) renderBrain();
@@ -1192,7 +1196,7 @@
     const btn = $('btn-theme');
     if (btn && btn.dataset.th !== theme()) { btn.dataset.th = theme(); btn.innerHTML = ico[theme()]; btn.title = t('theme_' + theme()); }
   }
-  let NAV = null, NIGHT = null, HALL = null;
+  let NAV = null, NIGHT = null, HALL = null, WIND = null;
   function forceNight(on) { if (!!S.nightForce === !!on) return; S.nightForce = !!on; themeBody(); applyStyle(); }
   function hideExtras(on, which) {
     S.nightHide = on ? (which instanceof RegExp ? which : which ? /^b-(warm|marks|repseg|points|route|short|ride|runner|wave|cmp|heat)/ : /^b-(warm|marks|repseg|points|route|short|ride|runner|wave|cmp)/) : null;
@@ -1204,8 +1208,8 @@
     if (!map || !map.getStyle()) return;
     map.getStyle().layers.forEach((L) => { if (NAV_HIDE.test(L.id)) map.setLayoutProperty(L.id, 'visibility', show ? 'visible' : 'none'); });
   }
-  function navStart() { if (NIGHT) NIGHT.close(); if (HALL) HALL.close(); closeAlgos(); $('brain').hidden = true; $('marks').hidden = true; navLayers(false); }
-  function navExit() { navLayers(true); const r = S.wantRoute && S.args.route; if (r) fitRoute(r); renderAll(); }
+  function navStart() { if (NIGHT) NIGHT.close(); if (HALL) HALL.close(); closeAlgos(); $('brain').hidden = true; $('marks').hidden = true; navLayers(false); S.windK = 0.5; }
+  function navExit() { navLayers(true); S.windK = 1; const r = S.wantRoute && S.args.route; if (r) fitRoute(r); renderAll(); }
   function startWalk(r) {
     if (!NAV || !r) return;
     NAV.start(r);

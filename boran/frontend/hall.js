@@ -141,7 +141,8 @@
 
     function draw() {
       const m = map(), d = st.hall;
-      if (!d || !layers()) return;
+      if (!d) { if (performance.now() - st.panelAt > 500) { st.panelAt = performance.now(); panel(ctx.now(), 0); } return; }
+      if (!layers()) { if (performance.now() - st.panelAt > 300) { st.panelAt = performance.now(); panel(ctx.now(), 0); } return; }
       const T = ctx.now();
       const plan = [], trail = [], sand = [], ripple = [], marks = [];
       const byTr = new Map();
@@ -214,8 +215,8 @@
       if (!box || box.hidden) return;
       const set = (k, v) => { const e = box.querySelector('.hl-k-' + k + ' b'); if (e && e.textContent !== String(v)) { e.textContent = v; e.parentNode.classList.remove('bump'); void e.parentNode.offsetWidth; e.parentNode.classList.add('bump'); } };
       set('people', st.people.size); set('marks', st.marks.size); set('road', road); set('done', st.done.size);
-      const r = [...st.react.values()];
-      box.querySelector('.hl-react').textContent = r.length ? t('hl_react', { m: Math.max(1, Math.round(r.reduce((a, b) => a + b, 0) / r.length / st.hall.spm)) }) : t('hl_fast');
+      const r = [...st.react.values()], spm = st.hall ? st.hall.spm : 1;
+      box.querySelector('.hl-react').textContent = r.length ? t('hl_react', { m: Math.max(1, Math.round(r.reduce((a, b) => a + b, 0) / r.length / spm)) }) : t('hl_fast');
       const items = (st.hall ? st.hall.feed : []).filter((e) => e.t >= st.t0 - 600).slice(0, 9);
       const html = items.length ? items.map((e) => {
         const j = jobOf(e), txt = feedText(e, j, T), done = j && T >= j.t2;
@@ -321,6 +322,7 @@
         if (ctx.onOpen) ctx.onOpen();
         if (ctx.forceNight) ctx.forceNight(true);
         if (ctx.hideExtras) ctx.hideExtras(true, /^b-(warm|marks|points|route|short|ride|runner|wave|cmp)/);
+        if (ctx.setWind) ctx.setWind(0.5);
         document.body.classList.add('hallshow');
         const box = document.getElementById('hall');
         box.hidden = false;
@@ -356,6 +358,7 @@
         if (ctx.fastReports) ctx.fastReports(false);
         if (ctx.hideExtras) ctx.hideExtras(false);
         if (ctx.forceNight) ctx.forceNight(false);
+        if (ctx.setWind) ctx.setWind(1);
         if (ctx.onClose) ctx.onClose();
       },
       restyle() { if (st.on && !st.phone) { const m = map(); if (m && !m.getSource('hl-sand')) layers(); } },

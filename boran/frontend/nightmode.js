@@ -88,6 +88,32 @@
     }
   }
 
+  const GRADE = [
+    [0, [255, 122, 69, 0.42], [58, 42, 106, 0.34], [0, 0, 0, 0]],
+    [1.6, [255, 110, 80, 0.10], [42, 40, 110, 0.22], [0, 0, 0, 0]],
+    [3, [0, 0, 0, 0], [24, 30, 80, 0.12], [90, 122, 255, 0.07]],
+    [7, [0, 0, 0, 0], [31, 165, 181, 0.10], [90, 122, 255, 0.05]],
+    [9.4, [0, 0, 0, 0], [60, 50, 140, 0.14], [106, 76, 200, 0.18]],
+    [11, [0, 0, 0, 0], [255, 178, 122, 0.20], [255, 138, 74, 0.44]],
+    [12.5, [0, 0, 0, 0], [168, 200, 255, 0.22], [255, 210, 154, 0.32]],
+  ];
+
+  function grade(h) {
+    let g = document.getElementById('grade');
+    if (h == null) { if (g) g.style.opacity = '0'; return; }
+    if (!g) { g = document.createElement('div'); g.id = 'grade'; document.body.insertBefore(g, document.getElementById('snow')); }
+    let i = 1;
+    while (i < GRADE.length - 1 && GRADE[i][0] < h) i++;
+    const a = GRADE[i - 1], b = GRADE[i], k = Math.max(0, Math.min(1, (h - a[0]) / (b[0] - a[0])));
+    const mix = (j) => a[j].map((v, n) => v + (b[j][n] - v) * k);
+    const rgba = (c) => 'rgba(' + c.slice(0, 3).map(Math.round).join(',') + ',' + c[3].toFixed(3) + ')';
+    const west = mix(1), top = mix(2), east = mix(3);
+    g.style.opacity = '1';
+    g.style.background = 'radial-gradient(70% 55% at 0% 8%,' + rgba(west) + ',rgba(0,0,0,0) 70%),'
+      + 'radial-gradient(75% 60% at 100% 6%,' + rgba(east) + ',rgba(0,0,0,0) 72%),'
+      + 'linear-gradient(180deg,' + rgba(top) + ' 0%,rgba(0,0,0,0) 55%)';
+  }
+
   function create(ctx) {
     const { map, t } = ctx;
     const st = { data: null, req: null, on: false, mode: 'ai', T: 0, playing: false, raf: 0, last: 0, riskT: -1, phase: 'night', M: null, mT: 0, twin: null, split: false, mainKey: 'ai', auto: 0 };
@@ -120,6 +146,7 @@
       if (ctx.hideExtras) ctx.hideExtras(true, true);
       m.once('moveend', () => { if (st.phase === 'morning') m.easeTo({ bearing: 8, zoom: view.zoom + 0.35, duration: MORN, easing: (x) => x }); });
       document.body.classList.add('nightshow');
+      if (ctx.setWind) ctx.setWind(0);
       if (st.split) {
         box.hidden = true;
         BOX2.hidden = false; SPLIT.hidden = false;
@@ -149,6 +176,7 @@
       }
       if (st.twin) { st.twin.remove(); st.twin = null; }
       document.body.classList.remove('nightshow');
+      if (ctx.setWind && st.on) ctx.setWind(0.4);
       BOX2.hidden = true; SPLIT.hidden = true; BOX2.innerHTML = '';
       document.documentElement.style.removeProperty('--split');
       SPLIT.querySelectorAll('.split-fin').forEach((x) => x.remove());
@@ -159,6 +187,7 @@
       const m = map(), M = st.M;
       if (!m.getLayer('nt-crowd') && m.isStyleLoaded()) { sandLayers(m, st.mainKey); m.addLayer(crowdLayer('nt-crowd', M, () => st.mainKey)); }
       computeCrowd(M, st.mT, ['now', 'ai']);
+      grade(11 + st.mT / 60);
       m.triggerRepaint();
       if (st.twin) st.twin.triggerRepaint();
       const clk = clock(st.data.end + st.mT), total = M.A.n;
@@ -278,6 +307,7 @@
         ctx.setRisk(a.map((v, i) => Math.round(v + (b[i] - v) * k)));
       }
       hud();
+      grade(T / 60);
     }
 
     function level(run, T) {
@@ -378,6 +408,7 @@
         st.on = true;
         if (ctx.forceNight) ctx.forceNight(true);
         if (ctx.hideExtras) ctx.hideExtras(true, false);
+        if (ctx.setWind) ctx.setWind(0.4);
         box.hidden = false;
         box.innerHTML = '<p class="empty" style="padding:18px">' + t('nt_loading') + '</p>';
         if (ctx.onOpen) ctx.onOpen();
@@ -397,10 +428,12 @@
         clearTimeout(st.auto);
         cancelAnimationFrame(st.raf);
         stopMorning();
+        grade(null);
         box.hidden = true;
         dropLayers();
         if (ctx.hideExtras) ctx.hideExtras(false, false);
         if (ctx.forceNight) ctx.forceNight(false);
+        if (ctx.setWind) ctx.setWind(1);
         ctx.setRisk(null);
         if (ctx.onClose) ctx.onClose();
       },
