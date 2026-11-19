@@ -12,10 +12,10 @@ import glob
 import gzip
 
 import boran
-from boran import config, graph, pipeline, reports, weather
+from boran import config, graph, hall, pipeline, reports, weather
 
 _BORAN_DIR = os.path.dirname(os.path.abspath(boran.__file__))
-_RELOAD_ORDER = ["geo", "config", "hmm", "bayes", "astar", "frost", "search", "mdp", "nav", "reports", "weather", "demo", "graph", "pipeline"]
+_RELOAD_ORDER = ["geo", "config", "hmm", "bayes", "astar", "frost", "search", "mdp", "nav", "night", "reports", "hall", "weather", "demo", "graph", "pipeline"]
 
 
 def code_signature():
@@ -121,7 +121,9 @@ def report_store(signature):
     c = load_city(signature)[0]
     pts = [(s["lon"], s["lat"]) for s in c.stops] + [(p["lon"], p["lat"]) for p in config.PLACES]
     avoid = [(p["lon"], p["lat"]) for p in config.PLACES if p["id"] in ("dorm", "campus")]
-    return reports.Store(c, pts, avoid=avoid)
+    store = reports.Store(c, pts, avoid=avoid)
+    store.fleet = hall.Fleet(c)
+    return store
 
 
 @st.cache_data(ttl=600, show_spinner=False, max_entries=8)
@@ -173,11 +175,13 @@ try:
 except OSError:
     reports_inline = store.export(an_live["risks"], time.time())
 
+hall_phone = str(st.query_params.get("zal", "")) not in ("", "0")
+
 route = None
 error = None
 profile = state.get("prof") if state.get("prof") in config.PROFILES else "base"
 src, dst = state.get("src"), state.get("dst")
-if src and dst:
+if src and dst and not hall_phone:
     try:
         route = find_route(scenario, stamp, sig, rkey, (round(src[0], 5), round(src[1], 5)), (round(dst[0], 5), round(dst[1], 5)), profile)
         if route is None:
@@ -208,6 +212,9 @@ payload = {
     "ack": state.get("n", 0),
     "reportsV": store.version,
     "nightV": night_file(sig),
+    "hall": "phone" if hall_phone else None,
+    "hallUrl": config.PUBLIC_URL.rstrip("/") + "/?zal=1",
+    "srvNow": time.time(),
     "reportsInline": reports_inline,
     "cityVersion": version,
     "city": inline_city,

@@ -1,3 +1,5 @@
+import os
+
 BBOX = (51.04, 71.28, 51.22, 71.62)
 CITY = (51.1283, 71.4305)
 TZ = "Asia/Almaty"
@@ -34,3 +36,5 @@ PROFILES = {
     "wheel": {"speed": 0.9, "risk": 2.6, "steps": None, "rough": 4.0, "fall": 1.8},
 }
 ROUGH = {"track", "path"}
+
+PUBLIC_URL = os.environ.get("BORAN_URL", "https://befpgfqzxitunj2kma6ebo.streamlit.app")

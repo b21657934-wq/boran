@@ -7,6 +7,7 @@
     get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { } },
   };
+  const DEV = (() => { let d = store.get('boran.dev', null); if (!d || !/^[a-z0-9]{6}$/.test(d)) { d = (Math.random().toString(36).slice(2) + '000000').slice(0, 6); store.set('boran.dev', d); } return d; })();
   const STATE_COL = { dry: '#7C8DB5', wet: '#4FA3FF', snow: '#DDEBFF', packed: '#FFB547', ice: '#FF5A5F' };
   const LANGS = ['ru', 'kk', 'en'];
 
@@ -38,6 +39,7 @@
     const first = !S.args;
     S.args = args;
     S.scenario = args.scenario;
+    if (args.srvNow) S.skew = args.srvNow - Date.now() / 1000;
     if (first) {
       const places = args.places;
       const P = (id) => { const p = places.find((q) => q.id === id); return { id, lon: p.lon, lat: p.lat }; };
@@ -77,7 +79,10 @@
     }
     if (args.reportsInline) applyReports(args.reportsInline);
     else if (args.reportsV !== S.repsV) fetchReports();
-    if (first) { startSplash(); setInterval(() => { if (document.visibilityState === 'visible') fetchReports(); }, 8000); }
+    if (first) {
+      if (args.hall === 'phone' && HALL) { const sp = $('splash'); if (sp) sp.remove(); S.splashDone = true; HALL.openPhone(); } else startSplash();
+      setInterval(() => { if (document.visibilityState === 'visible' && Date.now() - (S.repPollAt || 0) > (S.repEvery || 8000)) fetchReports(); }, 1000);
+    }
   }
 
   const mix = (a, b, k) => a.map((v, i) => Math.round(v + (b[i] - v) * k));
@@ -513,7 +518,7 @@
     S.styleTry = (S.styleTry || 0) + 1;
     const attempt = S.styleTry;
     map.setStyle(full, { diff: false });
-    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; S.tileShown = ''; refreshTiles(); loadHeat(); pushRoute(true); pushReports(); pushCompare(); if (NIGHT) NIGHT.restyle(); if (S.nightHide) map.getStyle().layers.forEach((l) => { if (S.nightHide.test(l.id)) map.setLayoutProperty(l.id, 'visibility', 'none'); }); });
+    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; S.tileShown = ''; refreshTiles(); loadHeat(); pushRoute(true); pushReports(); pushCompare(); if (NIGHT) NIGHT.restyle(); if (HALL) HALL.restyle(); if (S.nightHide) map.getStyle().layers.forEach((l) => { if (S.nightHide.test(l.id)) map.setLayoutProperty(l.id, 'visibility', 'none'); }); });
     setTimeout(() => {
       if (attempt !== S.styleTry || (map.getStyle() && map.getLayer('b-risk'))) return;
       if (attempt > 3) return;
@@ -544,14 +549,9 @@
     NAV = window.BoranNav ? window.BoranNav.create({ map, t, isNight, lang: () => S.lang, onStart: navStart, onExit: navExit, roadsNear, onShare: () => openShare('arrived') }) : null;
     if (!NIGHT && window.BoranNight) NIGHT = window.BoranNight.create({ map: () => map, t, version: () => S.args && S.args.nightV,
       setRisk: (tb) => { S.nightRisk = tb; S.riskTable = tb || (S.args && S.args.riskTable); pushRisk(); },
-      onOpen: () => { $('brain').hidden = true; $('marks').hidden = true; closeAlgos(); $('panel').classList.add('min'); $('btn-night').setAttribute('aria-pressed', 'true'); },
+      onOpen: () => { if (HALL) HALL.close(); $('brain').hidden = true; $('marks').hidden = true; closeAlgos(); $('panel').classList.add('min'); $('btn-night').setAttribute('aria-pressed', 'true'); },
       onClose: () => { $('btn-night').setAttribute('aria-pressed', 'false'); },
-      forceNight: (on) => { if (!!S.nightForce === !!on) return; S.nightForce = !!on; themeBody(); applyStyle(); },
-      hideExtras: (on, heat) => {
-        S.nightHide = on ? (heat ? /^b-(warm|marks|repseg|points|route|short|ride|runner|wave|cmp|heat)/ : /^b-(warm|marks|repseg|points|route|short|ride|runner|wave|cmp)/) : null;
-        const st = map && map.getStyle();
-        if (st) st.layers.forEach((l) => { if (/^b-/.test(l.id) && !/^b-landmarks/.test(l.id)) map.setLayoutProperty(l.id, 'visibility', S.nightHide && S.nightHide.test(l.id) ? 'none' : 'visible'); });
-      },
+      forceNight, hideExtras,
       makeTwin: (box) => {
         const st = map.getStyle();
         st.layers = st.layers.filter((l) => !/^(b-|nt-|n-)/.test(l.id) || l.id.startsWith('b-landmarks'));
@@ -564,6 +564,14 @@
         });
         return m2;
       } });
+    if (!HALL && window.BoranHall) HALL = window.BoranHall.create({ map: () => map, t, toast, hideExtras, forceNight,
+      now: () => Date.now() / 1000 + (S.skew || 0),
+      url: () => (S.args && S.args.hallUrl) || location.href,
+      onOpen: () => { if (NIGHT) NIGHT.close(); if (S.markMode) $('btn-ice').click(); $('brain').hidden = true; $('marks').hidden = true; closeAlgos(); $('btn-hall').setAttribute('aria-pressed', 'true'); },
+      onClose: () => { $('btn-hall').setAttribute('aria-pressed', 'false'); },
+      fastReports: (on) => { S.repEvery = on ? 3000 : 8000; },
+      mark: async (k, lon, lat) => { const pr = await predictAt(lon, lat); return addReport(k, lon, lat, { pred: pr.pred, risk: +pr.risk.toFixed(2) }).id; },
+      seen: (ids) => { const k = new Set(ids), n = S.pendingReps.length; S.pendingReps = S.pendingReps.filter((r) => !k.has(r.id)); if (S.pendingReps.length !== n) pushReports(); } });
     requestAnimationFrame(frame);
     if (!S.city.demo) {
       try {
@@ -633,10 +641,11 @@
   let repReq = null;
   function fetchReports() {
     if (repReq || !map) return;
+    S.repPollAt = Date.now();
     repReq = fetch('reports.json?t=' + Date.now(), { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then(applyReports).catch(() => {}).finally(() => { repReq = null; });
   }
   function addReport(k, lon, lat, extra) {
-    const r = Object.assign({ id: 'u' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), k, lon: +lon.toFixed(6), lat: +lat.toFixed(6), at: Date.now() }, extra || {});
+    const r = Object.assign({ id: 'u' + DEV + '.' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5), k, lon: +lon.toFixed(6), lat: +lat.toFixed(6), at: Date.now() }, extra || {});
     S.pendingReps.push(r); pushReports(); send();
     return r;
   }
@@ -800,7 +809,7 @@
     renderWho();
     const a = S.args, wx = a.weather, now = wx.now;
     document.documentElement.lang = S.lang === 'kk' ? 'kk' : S.lang;
-    $('t-brain').textContent = t('brain'); $('t-scn').textContent = t('scn'); $('t-ice').textContent = t('r_btn'); $('t-night').textContent = t('nt_btn'); $('t-from').textContent = t('from'); $('t-to').textContent = t('to');
+    $('t-brain').textContent = t('brain'); $('t-scn').textContent = t('scn'); $('t-ice').textContent = t('r_btn'); $('t-night').textContent = t('nt_btn'); $('t-hall').textContent = t('hl_btn'); $('t-from').textContent = t('from'); $('t-to').textContent = t('to');
     $('t-build').textContent = t('build'); $('t-walk').textContent = t('walk_btn'); $('t-legend').textContent = t('legend'); $('t-leg-lo').textContent = t('lo'); $('t-leg-hi').textContent = t('hi');
     $('t-brain-title').textContent = t('brain'); $('t-marks-title').textContent = t('m_title'); $('btn-lang').textContent = t('code');
     $('btn-brain').setAttribute('aria-label', t('brain')); $('btn-scn').setAttribute('aria-label', t('scn')); $('btn-ice').setAttribute('aria-label', t('m_title'));
@@ -1014,6 +1023,7 @@
     const [lon, lat] = info.coordinate;
     const [s, w, n, e] = S.city.bbox;
     if (lon < w || lon > e || lat < s || lat > n) return;
+    if (HALL && HALL.phoneOn()) { HALL.tap(+lon.toFixed(6), +lat.toFixed(6)); return; }
     if (S.picking) {
       const which = S.picking; S.picking = null;
       choose(which, { lon: +lon.toFixed(5), lat: +lat.toFixed(5) }); return;
@@ -1050,7 +1060,7 @@
       sp.classList.add('out'); setTimeout(() => sp.remove(), 950);
       const c = S.args.places.find((p) => p.id === 'campus');
       map.easeTo({ bearing: 28, duration: 2600, easing: (x) => x });
-      setTimeout(() => { if (!(S.wantRoute && S.args.route)) map.flyTo({ center: [c.lon, c.lat], zoom: 15.3, pitch: 60, bearing: 18, duration: 5200, essential: true }); }, 2650);
+      setTimeout(() => { if (!(S.wantRoute && S.args.route) && !(HALL && HALL.active()) && !(NIGHT && NIGHT.active())) map.flyTo({ center: [c.lon, c.lat], zoom: 15.3, pitch: 60, bearing: 18, duration: 5200, essential: true }); }, 2650);
     };
     const quick = /[?&]quick/.test(location.search) || navigator.webdriver;
     sp.addEventListener('pointerdown', done);
@@ -1182,13 +1192,19 @@
     const btn = $('btn-theme');
     if (btn && btn.dataset.th !== theme()) { btn.dataset.th = theme(); btn.innerHTML = ico[theme()]; btn.title = t('theme_' + theme()); }
   }
-  let NAV = null, NIGHT = null;
+  let NAV = null, NIGHT = null, HALL = null;
+  function forceNight(on) { if (!!S.nightForce === !!on) return; S.nightForce = !!on; themeBody(); applyStyle(); }
+  function hideExtras(on, which) {
+    S.nightHide = on ? (which instanceof RegExp ? which : which ? /^b-(warm|marks|repseg|points|route|short|ride|runner|wave|cmp|heat)/ : /^b-(warm|marks|repseg|points|route|short|ride|runner|wave|cmp)/) : null;
+    const st = map && map.getStyle();
+    if (st) st.layers.forEach((l) => { if (/^b-/.test(l.id) && !/^b-landmarks/.test(l.id)) map.setLayoutProperty(l.id, 'visibility', S.nightHide && S.nightHide.test(l.id) ? 'none' : 'visible'); });
+  }
   const NAV_HIDE = /^b-(?!landmarks|heat)|^highway-name|^road_one_way|^poi_/;
   function navLayers(show) {
     if (!map || !map.getStyle()) return;
     map.getStyle().layers.forEach((L) => { if (NAV_HIDE.test(L.id)) map.setLayoutProperty(L.id, 'visibility', show ? 'visible' : 'none'); });
   }
-  function navStart() { if (NIGHT) NIGHT.close(); closeAlgos(); $('brain').hidden = true; $('marks').hidden = true; navLayers(false); }
+  function navStart() { if (NIGHT) NIGHT.close(); if (HALL) HALL.close(); closeAlgos(); $('brain').hidden = true; $('marks').hidden = true; navLayers(false); }
   function navExit() { navLayers(true); const r = S.wantRoute && S.args.route; if (r) fitRoute(r); renderAll(); }
   function startWalk(r) {
     if (!NAV || !r) return;
@@ -1346,10 +1362,11 @@
   $('algos-x').onclick = () => closeAlgos();
   $('btn-locate').onclick = () => locate('src');
   $('btn-night').onclick = () => { if (!NIGHT) return; if (NIGHT.active()) NIGHT.close(); else NIGHT.open(); };
+  $('btn-hall').onclick = () => { if (!HALL) return; if (HALL.active()) HALL.close(); else HALL.open(); };
   $('btn-brain').onclick = () => { if (NIGHT) NIGHT.close(); const b = $('brain'); $('marks').hidden = true; closeAlgos(); b.hidden = !b.hidden; if (!b.hidden) renderBrain(); };
   $('brain-x').onclick = () => { $('brain').hidden = true; };
   $('marks-x').onclick = () => { $('marks').hidden = true; };
-  $('btn-lang').onclick = () => { S.lang = LANGS[(LANGS.indexOf(S.lang) + 1) % LANGS.length]; store.set('boran.lang', S.lang); renderAll(); if (NIGHT) NIGHT.relabel(); };
+  $('btn-lang').onclick = () => { S.lang = LANGS[(LANGS.indexOf(S.lang) + 1) % LANGS.length]; store.set('boran.lang', S.lang); renderAll(); if (NIGHT) NIGHT.relabel(); if (HALL) HALL.relabel(); };
   $('btn-theme').onclick = () => {
     S.themeForce = THEMES[(THEMES.indexOf(theme()) + 1) % THEMES.length];
     store.set('boran.theme', S.themeForce);
@@ -1359,6 +1376,7 @@
   };
   $('btn-ice').onclick = () => {
     if (NIGHT && !S.markMode) NIGHT.close();
+    if (HALL && !S.markMode) HALL.close();
     S.markMode = !S.markMode; $('btn-ice').setAttribute('aria-pressed', String(S.markMode)); $('mark-pop').hidden = true; document.body.classList.toggle('markmode', S.markMode);
     if (S.markMode) { $('brain').hidden = true; closeAlgos(); $('marks').hidden = false; renderMarks(); toast(t('m_hint')); $('panel').classList.add('min'); } else { $('marks').hidden = true; toast(t('m_off')); }
   };
@@ -1378,6 +1396,6 @@
   };
   $('panel-handle').onclick = () => $('panel').classList.toggle('min');
   $('wx').onclick = () => $('wx').classList.toggle('open');
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (NIGHT) NIGHT.close(); $('brain').hidden = true; closeAlgos(); $('marks').hidden = true; $('scn-menu').hidden = true; $('place-list').hidden = true; S.picking = null; if (S.args) renderAll(); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (NIGHT) NIGHT.close(); if (HALL) HALL.close(); $('brain').hidden = true; closeAlgos(); $('marks').hidden = true; $('scn-menu').hidden = true; $('place-list').hidden = true; S.picking = null; if (S.args) renderAll(); } });
   window.__boran = S;
 })();

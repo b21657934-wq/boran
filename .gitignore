@@ -8,3 +8,6 @@ boran/frontend/tiles/
 boran/frontend/reports.json
 boran/frontend/reports.json.*.tmp
 boran/frontend/night.json
+boran/frontend/hall.json
+boran/frontend/feed.json
+boran/frontend/*.json.*.tmp

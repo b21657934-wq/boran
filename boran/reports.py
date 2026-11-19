@@ -75,6 +75,9 @@ class Store:
         self.busy = ranked[len(ranked) // 20] if len(ranked) > 20 else self.fmax
         self.calm = ranked[len(ranked) // 4] if len(ranked) > 4 else 1
         self.published = (None, 0.0)
+        self.fleet = None
+        self.fresh = []
+        self.hall_written = -1
         if seed:
             self.seed(now or time.time(), avoid)
 
@@ -93,6 +96,8 @@ class Store:
             self.items.append({"id": rid, "k": kind, "lon": round(lon, 6), "lat": round(lat, 6), "e": edge, "es": spread,
                                "t": float(t if t is not None else time.time()), "pred": pred, "risk": risk, "city": bool(by_city)})
             self.ids.add(rid)
+            if self.fleet is not None and not by_city and not rid.startswith("demo-"):
+                self.fresh.append(self.items[-1])
             self._prune(self.items[-1]["t"])
             self.version += 1
         return True
@@ -229,16 +234,43 @@ class Store:
                 "reports": [[r["id"], r["k"], r["lon"], r["lat"], int(r["t"]), 1 if r["city"] else 0, r["pred"] or "", r["e"]] for r in reps],
                 "segs": segs, "top": [q for q in self.top(risks, now) if not q["sanded"]], "done": self.done(now)}
 
-    def publish(self, folder, risks, now, every=60.0):
-        v, at = self.published
-        if v == self.version and now - at < every:
-            return False
-        blob = json.dumps(self.export(risks, now), ensure_ascii=False, separators=(",", ":"))
-        path = os.path.join(folder, "reports.json")
+    def dispatch(self, risks, now):
+        if self.fleet is None:
+            return
+        with self.lock:
+            fresh, self.fresh = self.fresh, []
+        if not fresh:
+            return
+        obs = self.by_edge(now)
+        for r in fresh:
+            if r["t"] < now - 600.0:
+                continue
+            seen = obs.get(r["e"], [])
+            p = belief(risks[r["e"]], seen, now)
+            prior = belief(risks[r["e"]], [o for o in seen if o[2] != r["id"]], now)
+            name, near = self.label(r["e"])
+            self.fleet.handle(dict(r, name=name, near=near), p, now, prior)
+
+    @staticmethod
+    def _write(folder, name, data):
+        blob = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        path = os.path.join(folder, name)
         tmp = path + ".%d.tmp" % threading.get_ident()
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(blob)
         os.replace(tmp, path)
+
+    def publish(self, folder, risks, now, every=60.0):
+        self.dispatch(risks, now)
+        if self.fleet is not None and self.fleet.version != self.hall_written:
+            v = self.fleet.version
+            self._write(folder, "hall.json", self.fleet.export(now))
+            self._write(folder, "feed.json", self.fleet.export_feed(now))
+            self.hall_written = v
+        v, at = self.published
+        if v == self.version and now - at < every:
+            return False
+        self._write(folder, "reports.json", self.export(risks, now))
         self.published = (self.version, now)
         return True
 
