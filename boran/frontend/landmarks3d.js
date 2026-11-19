@@ -121,22 +121,29 @@ void main(){
     lathe(M, [[2.0, 2.8], [2.0, 80]], 16, 0);
     sphere(M, 0, 0, 89, 11, 48, 28, 1);
     tube(M, Array.from({ length: 40 }, (_, k) => { const a = (k / 39) * Math.PI * 2; return [Math.cos(a) * 10.4, Math.sin(a) * 10.4, 83]; }), 0.55, 0.55, 8, 0);
-    const branch = (ph, tw, ctl, r0, r1) => {
-      const pts = [];
-      for (let k = 0; k <= 24; k++) {
-        const t = k / 24, q = bez(ctl[0], ctl[1], ctl[2], ctl[3], t), a = ph + tw * t;
-        pts.push([Math.cos(a) * q[0], Math.sin(a) * q[0], q[1]]);
-      }
-      tube(M, pts, r0, r1, 7, 0);
-    };
-    const N = 18;
+    const curve = (ph, ctl) => Array.from({ length: 25 }, (_, k) => { const q = bez(ctl[0], ctl[1], ctl[2], ctl[3], k / 24); return [Math.cos(ph) * q[0], Math.sin(ph) * q[0], q[1]]; });
+    const N = 12, outer = [];
     for (let i = 0; i < N; i++) {
-      const ph = (i / N) * Math.PI * 2, z0 = 34 + (i % 3) * 3;
-      branch(ph, 0.12, [[3.8, z0], [6.5, z0 + 20], [18.5, 70 + (i % 2) * 3], [21 + (i % 2) * 1.5, 93 + (i % 3) * 3]], 0.55, 0.22);
+      const ph = (i / N) * Math.PI * 2;
+      const pts = curve(ph, [[4.2, 36], [8.5, 54], [16.5, 74], [24.5, 99]]);
+      outer.push(pts);
+      tube(M, pts, 0.85, 0.12, 8, 0);
     }
-    for (let i = 0; i < 14; i++) {
-      const ph = ((i + 0.5) / 14) * Math.PI * 2, z0 = 48 + (i % 2) * 3;
-      branch(ph, -0.1, [[3.6, z0], [5.0, z0 + 12], [11.5, 74], [13.5, 84 + (i % 2) * 2]], 0.42, 0.2);
+    const rAt = (z) => { const P = outer[0]; for (let k = 1; k < P.length; k++) if (P[k][2] >= z) { const a = P[k - 1], b = P[k], f = (z - a[2]) / (b[2] - a[2]); return Math.hypot(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f); } return 24; };
+    const ring = (z, r, w) => tube(M, Array.from({ length: 49 }, (_, k) => { const a = (k / 48) * Math.PI * 2; return [Math.cos(a) * r, Math.sin(a) * r, z]; }), w, w, 6, 0);
+    [52, 64, 79].forEach((z, k) => ring(z, rAt(z), k === 2 ? 0.7 : 0.4));
+    const at = (P, z) => { for (let k = 1; k < P.length; k++) if (P[k][2] >= z) { const a = P[k - 1], b = P[k], f = (z - a[2]) / (b[2] - a[2]); return a.map((q, n) => q + (b[n] - q) * f); } return P[P.length - 1]; };
+    for (let i = 0; i < N; i++) {
+      const A = outer[i], B = outer[(i + 1) % N];
+      [[44, 58], [58, 72], [72, 88]].forEach(([z0, z1]) => {
+        tube(M, [at(A, z0), at(B, z1)], 0.32, 0.32, 5, 0);
+        tube(M, [at(B, z0), at(A, z1)], 0.32, 0.32, 5, 0);
+      });
+    }
+    ring(80, 12.2, 0.9);
+    for (let i = 0; i < 16; i++) {
+      const ph = ((i + 0.5) / 16) * Math.PI * 2;
+      tube(M, curve(ph, [[3.6, 60], [5.5, 70], [9.5, 76], [12.2, 80]]), 0.35, 0.3, 6, 0);
     }
     lathe(M, [[0.55, 99.6], [0.08, 107]], 10, 0);
     return M;
