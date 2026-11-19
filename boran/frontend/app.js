@@ -19,7 +19,7 @@
   const t = (k, vars) => { let s = (window.I18N[S.lang] || window.I18N.ru)[k]; if (s == null) s = window.I18N.ru[k] ?? k; if (vars) for (const a in vars) s = s.split('{' + a + '}').join(vars[a]); return s; };
   const num = (v, d = 0) => Number(v).toFixed(d).replace('-', '−');
   const THEMES = ['city', 'game', 'night'];
-  const theme = () => (THEMES.includes(S.themeForce) ? S.themeForce : (new Date().getHours() >= 18 || new Date().getHours() < 7 ? 'night' : 'city'));
+  const theme = () => (S.nightForce ? 'night' : THEMES.includes(S.themeForce) ? S.themeForce : (new Date().getHours() >= 18 || new Date().getHours() < 7 ? 'night' : 'city'));
   const isNight = () => theme() === 'night';
 
   function post(type, extra) { window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, extra), '*'); }
@@ -513,7 +513,7 @@
     S.styleTry = (S.styleTry || 0) + 1;
     const attempt = S.styleTry;
     map.setStyle(full, { diff: false });
-    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; S.tileShown = ''; refreshTiles(); loadHeat(); pushRoute(true); pushReports(); pushCompare(); if (NIGHT) NIGHT.restyle(); });
+    map.once('styledata', () => { S.routeDrawn = null; S.drawK = null; S.waveN = -1; S.tileShown = ''; refreshTiles(); loadHeat(); pushRoute(true); pushReports(); pushCompare(); if (NIGHT) NIGHT.restyle(); if (S.nightHide) map.getStyle().layers.forEach((l) => { if (S.nightHide.test(l.id)) map.setLayoutProperty(l.id, 'visibility', 'none'); }); });
     setTimeout(() => {
       if (attempt !== S.styleTry || (map.getStyle() && map.getLayer('b-risk'))) return;
       if (attempt > 3) return;
@@ -545,7 +545,25 @@
     if (!NIGHT && window.BoranNight) NIGHT = window.BoranNight.create({ map: () => map, t, version: () => S.args && S.args.nightV,
       setRisk: (tb) => { S.nightRisk = tb; S.riskTable = tb || (S.args && S.args.riskTable); pushRisk(); },
       onOpen: () => { $('brain').hidden = true; $('marks').hidden = true; closeAlgos(); $('panel').classList.add('min'); $('btn-night').setAttribute('aria-pressed', 'true'); },
-      onClose: () => { $('btn-night').setAttribute('aria-pressed', 'false'); } });
+      onClose: () => { $('btn-night').setAttribute('aria-pressed', 'false'); },
+      forceNight: (on) => { if (!!S.nightForce === !!on) return; S.nightForce = !!on; themeBody(); applyStyle(); },
+      hideExtras: (on, heat) => {
+        S.nightHide = on ? (heat ? /^b-(warm|marks|repseg|points|route|short|ride|runner|wave|cmp|heat)/ : /^b-(warm|marks|repseg|points|route|short|ride|runner|wave|cmp)/) : null;
+        const st = map && map.getStyle();
+        if (st) st.layers.forEach((l) => { if (/^b-/.test(l.id) && !/^b-landmarks/.test(l.id)) map.setLayoutProperty(l.id, 'visibility', S.nightHide && S.nightHide.test(l.id) ? 'none' : 'visible'); });
+      },
+      makeTwin: (box) => {
+        const st = map.getStyle();
+        st.layers = st.layers.filter((l) => !/^(b-|nt-|n-)/.test(l.id) || l.id.startsWith('b-landmarks'));
+        Object.keys(st.sources).forEach((k) => { if (/^(b-|nt-|n-)/.test(k) && k !== 'b-landmarks') delete st.sources[k]; });
+        const m2 = new ML.Map({ container: box, style: st, center: map.getCenter(), zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing(),
+          interactive: false, attributionControl: false, antialias: true, fadeDuration: 0, maxPitch: 70 });
+        m2.on('styleimagemissing', (ev) => {
+          const k = /^b-(ice|park|wood)-(city|game|night)$/.exec(ev.id);
+          if (k && !m2.hasImage(ev.id)) m2.addImage(ev.id, patternImage(k[1], k[2]), { pixelRatio: 2 });
+        });
+        return m2;
+      } });
     requestAnimationFrame(frame);
     if (!S.city.demo) {
       try {

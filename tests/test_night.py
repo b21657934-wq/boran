@@ -29,3 +29,13 @@ def test_ai_plan_prevents_more_falls_than_nearest_main_road():
     assert ai["final"] <= now["final"] + 1e-6
     assert ai["final"] < ai["base"]
     assert all(t[2] <= night.END_MIN + 1 for p in ai["trucks"] for t in p)
+
+
+def test_morning_crowd_falls_less_with_ai():
+    city, n = _night()
+    now, ai = n.run("now"), n.run("ai")
+    m = n.crowd({"now": now["sanded_set"], "ai": ai["sanded_set"]}, agents=400, n_paths=60)
+    assert len(m["agents"]) == 400 and m["paths"]
+    assert m["falls"]["ai"] <= m["falls"]["none"] and m["falls"]["now"] <= m["falls"]["none"]
+    for row in m["agents"]:
+        assert 0 <= row[0] < len(m["paths"]) and all(f == -1 or 0 <= f <= 1000 for f in row[3:])

@@ -1,7 +1,8 @@
 import heapq
 import math
+import random
 
-from . import bayes, hmm, nav, weather
+from . import astar, bayes, hmm, nav, weather
 
 ROADS = {"trunk", "primary", "secondary", "tertiary", "unclassified", "residential", "living_street"}
 RANK = {"trunk": 0, "primary": 1, "secondary": 2, "tertiary": 3}
@@ -16,6 +17,9 @@ P_SAND = 0.10
 STROKE_MAX = 700.0
 NEAR = 22.0
 TARGET_INJURIES = 300.0
+CROWD = 5000
+CROWD_PATHS = 1400
+HOME_HW = {"residential", "living_street", "service", "footway", "pedestrian", "path"}
 DEPOTS = [(71.420, 51.100), (71.405, 51.082), (71.430, 51.168), (71.500, 51.158), (71.455, 51.192), (71.495, 51.118)]
 
 
@@ -234,9 +238,52 @@ def _thin(pts, keep=12.0):
     return [[round(q[0], 5), round(q[1], 5), q[2]] for q in out]
 
 
+def walk_paths(city, n_paths=CROWD_PATHS, seed=11):
+    rnd = random.Random(seed)
+    homes = sorted({n for ed in city.edges if ed["hw"] in HOME_HW for n in (ed["u"], ed["v"])})
+    dests = [(s["lon"], s["lat"]) for s in city.stops]
+    dests += [(w["lon"], w["lat"]) for w in city.data.get("warm") or [] if w.get("kind") in ("mall", "shop")]
+    dnodes = [city.nearest_node(lon, lat) for lon, lat in dests]
+    dxy = [city.proj.xy(*city.nodes[n]) for n in dnodes]
+    zero = [0.0] * len(city.edges)
+    paths, tries = [], 0
+    while len(paths) < n_paths and tries < n_paths * 30 and homes and dnodes:
+        tries += 1
+        a = rnd.choice(homes)
+        ax, ay = city.proj.xy(*city.nodes[a])
+        k = rnd.randrange(len(dnodes))
+        d = math.hypot(dxy[k][0] - ax, dxy[k][1] - ay)
+        if not 250.0 < d < 1600.0:
+            continue
+        res = astar.search(city, a, dnodes[k], zero, 0.0, safe=False)
+        if res is None or not res["edges"]:
+            continue
+        pts, cum, cur = [list(city.nodes[a])], [0.0], a
+        for ei in res["edges"]:
+            ed = city.edges[ei]
+            p = ed["p"] if ed["u"] == cur else ed["p"][::-1]
+            pts.extend(list(q) for q in p[1:])
+            cum.append(cum[-1] + ed["len"])
+            cur = ed["v"] if ed["u"] == cur else ed["u"]
+        paths.append({"edges": res["edges"], "cum": cum, "pts": pts})
+    return paths
+
+
+def path_flow(city, paths):
+    used = [0] * len(city.edges)
+    for P in paths:
+        for e in P["edges"]:
+            used[e] += 1
+    return used
+
+
 class Night:
-    def __init__(self, city, flow, scenario="thaw_freeze", trucks=6):
+    def __init__(self, city, flow=None, scenario="thaw_freeze", trucks=6, n_paths=CROWD_PATHS):
         self.city = city
+        self.paths = None
+        if flow is None:
+            self.paths = walk_paths(city, n_paths)
+            flow = path_flow(city, self.paths)
         self.times, self.temps, self.tables, self.beliefs = night_tables(scenario)
         self.p_morning = [self.tables[MORNING][ed["mask"] & 31] for ed in city.edges]
         self.flow = flow
@@ -342,10 +389,52 @@ class Night:
             heapq.heappush(queue, (t2, k, snodes[-1]))
         final = self.total(sanded)
         return {"trucks": paths, "sand": sand_lines, "curve": curve, "base": round(base, 1), "final": round(final, 1),
-                "km": round(sum(self.strokes[i]["len"] for i in done_strokes) / 1000.0, 1), "n": len(done_strokes), "firsts": firsts}
+                "km": round(sum(self.strokes[i]["len"] for i in done_strokes) / 1000.0, 1), "n": len(done_strokes), "firsts": firsts,
+                "sanded_set": sanded}
 
-    def export(self):
+    def crowd(self, sets, agents=CROWD, n_paths=CROWD_PATHS, seed=11):
+        city = self.city
+        rnd = random.Random(seed + 1)
+        paths = self.paths or walk_paths(city, n_paths, seed)
+        weight = lambda e, s: (P_SAND if e in sets.get(s, ()) else self.p_morning[e]) * city.edges[e]["len"]
+        picks = [rnd.randrange(len(paths)) for _ in range(agents)]
+        raw = sum(weight(e, "none") for k in picks for e in paths[k]["edges"])
+        c = TARGET_INJURIES / raw if raw > 0 else 0.0
+        rows, falls = [], {"none": 0, "now": 0, "ai": 0}
+        for k in picks:
+            P = paths[k]
+            dep = rnd.uniform(0.0, 60.0)
+            speed = min(1.7, max(0.9, rnd.gauss(1.3, 0.15)))
+            us = [(rnd.random(), rnd.random()) for _ in P["edges"]]
+            row = [k, int(round(dep * 10)), int(round(speed * 100))]
+            for s in ("now", "ai", "none"):
+                f = -1
+                for i, e in enumerate(P["edges"]):
+                    if us[i][0] < min(0.6, c * weight(e, s)):
+                        f = int(round((P["cum"][i] + us[i][1] * city.edges[e]["len"]) / P["cum"][-1] * 1000))
+                        falls[s] += 1
+                        break
+                row.append(f)
+            rows.append(row)
+        enc = []
+        for P in paths:
+            out, px, py = [], 0, 0
+            kept = [P["pts"][0]]
+            for q in P["pts"][1:-1]:
+                if abs(q[0] - kept[-1][0]) * 69000 + abs(q[1] - kept[-1][1]) * 111000 >= 6.0:
+                    kept.append(q)
+            kept.append(P["pts"][-1])
+            for i, (lon, lat) in enumerate(kept):
+                x, y = int(round(lon * 1e5)), int(round(lat * 1e5))
+                out += [x, y] if i == 0 else [x - px, y - py]
+                px, py = x, y
+            enc.append(out)
+        return {"start": MORNING * 60, "dur": 90, "paths": enc, "agents": rows, "falls": falls}
+
+    def export(self, agents=CROWD):
+        now, ai = self.run("now"), self.run("ai")
+        crowd = self.crowd({"now": now.pop("sanded_set"), "ai": ai.pop("sanded_set")}, agents=agents)
         return {"times": self.times, "temps": self.temps, "tables": [[int(round(v * 100)) for v in tb] for tb in self.tables],
                 "ice": [round(b[4], 3) for b in self.beliefs], "start": START_H, "deploy": DEPLOY_MIN, "end": END_MIN,
                 "depots": [list(self.city.nodes[n]) for n in self.depots],
-                "now": self.run("now"), "ai": self.run("ai")}
+                "now": now, "ai": ai, "morning": crowd}

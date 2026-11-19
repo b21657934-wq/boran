@@ -5,14 +5,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from boran import config, graph, night, reports
+from boran import graph, night
 
 
 def main():
     city = graph.City(graph.load())
-    pts = [(s["lon"], s["lat"]) for s in city.stops] + [(p["lon"], p["lat"]) for p in config.PLACES]
-    flow = reports.foot_traffic(city, pts, 900)
-    data = night.Night(city, flow).export()
+    data = night.Night(city).export()
     out = os.path.join(os.path.dirname(graph.data_path()), "night.json.gz")
     blob = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     with gzip.open(out, "wb") as f:

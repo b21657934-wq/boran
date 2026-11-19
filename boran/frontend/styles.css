@@ -36,6 +36,25 @@ button{font:inherit;color:inherit;cursor:pointer;border:0;background:none;paddin
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 [hidden]{display:none!important}
 #map{position:fixed;inset:0}
+#map2{position:fixed;inset:0;pointer-events:none;clip-path:inset(0 0 0 var(--split,50%))}
+#map2[hidden]{display:none}
+body.nightshow #wx,body.nightshow #panel,body.nightshow #legend{display:none!important}
+#split{position:fixed;inset:0;pointer-events:none;z-index:3}
+#split[hidden]{display:none}
+.split-bar{position:absolute;top:0;bottom:0;left:var(--split,50%);width:2px;margin-left:-1px;background:rgba(255,255,255,.85);box-shadow:0 0 18px rgba(120,220,255,.8)}
+.split-knob{position:absolute;top:50%;left:var(--split,50%);width:44px;height:44px;margin:-22px 0 0 -22px;border-radius:50%;background:#fff;color:#0A1022;display:grid;place-items:center;font-weight:800;pointer-events:auto;cursor:ew-resize;box-shadow:0 6px 22px rgba(0,0,0,.35);touch-action:none}
+.split-l,.split-r{position:absolute;top:84px;padding:7px 14px;border-radius:999px;font-size:14px;font-weight:800;letter-spacing:.01em;color:#fff;backdrop-filter:blur(10px)}
+.split-l{right:calc(100% - var(--split,50%) + 14px);background:rgba(255,154,60,.35);border:1px solid rgba(255,154,60,.7)}
+.split-r{left:calc(var(--split,50%) + 14px);background:rgba(63,208,224,.3);border:1px solid rgba(63,208,224,.7)}
+.split-c{position:absolute;bottom:26px;min-width:170px;padding:12px 16px;border-radius:18px;background:rgba(8,12,24,.72);backdrop-filter:blur(12px);color:#fff;font-variant-numeric:tabular-nums}
+.split-cl{right:calc(100% - var(--split,50%) + 14px);border:1px solid rgba(255,154,60,.6)}
+.split-cr{left:calc(var(--split,50%) + 14px);border:1px solid rgba(63,208,224,.6)}
+.split-fin{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(520px,86vw);padding:22px 24px;border-radius:24px;background:rgba(8,12,24,.86);backdrop-filter:blur(16px);color:#fff;pointer-events:auto;box-shadow:0 20px 60px rgba(0,0,0,.5);animation:pop .3s var(--ease)}
+.split-fin p{margin:0;font-size:20px;line-height:1.35;font-weight:700}.split-fin small{display:block;margin-top:10px;opacity:.7;font-size:12.5px;line-height:1.4}
+.split-fin div{display:flex;gap:10px;margin-top:16px}.split-fin .cta{flex:1}
+.nt-morning{width:100%;margin-top:12px}
+.split-c b{display:block;font-size:44px;line-height:1;font-weight:800}.split-c b.red{color:#FF5A5F}
+.split-c small{display:block;font-size:12px;opacity:.75;margin-top:4px}
 #map canvas{outline:none}
 .pin{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:rgba(159,227,255,.25);animation:pinp 2s infinite}
 .pin i{width:16px;height:16px;border-radius:50%;background:var(--bg0);border:4px solid var(--ice);box-shadow:0 2px 10px rgba(0,0,0,.4)}
