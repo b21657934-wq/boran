@@ -300,6 +300,24 @@ def _edge_feats(ed):
     return {f: bool(ed["mask"] & bit) for f, bit in zip(bayes.FEATURES, (1, 2, 4, 8, 16))}
 
 
+def _kerb_side(proj, line, at_end, reach=15.0):
+    pts = [proj.xy(*p) for p in (line[::-1] if at_end else line)]
+    x0, y0 = pts[0]
+    far, acc = pts[-1], 0.0
+    for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+        acc += math.hypot(bx - ax, by - ay)
+        far = (bx, by)
+        if acc >= reach:
+            break
+    dx, dy = far[0] - x0, far[1] - y0
+    if at_end:
+        dx, dy = -dx, -dy
+    d = math.hypot(dx, dy)
+    if d < 1e-6:
+        return None
+    return (math.degrees(math.atan2(dy / d, -dx / d)) + 360.0) % 360.0
+
+
 def route(city, an, weather, src, dst, profile="base"):
     prof = None if profile not in config.PROFILES or profile == "base" else config.PROFILES[profile]
     speed = prof["speed"] if prof else config.WALK_SPEED
@@ -409,7 +427,7 @@ def route(city, an, weather, src, dst, profile="base"):
                 "wait_min": config.TRANSIT_WAIT_MIN,
                 "total_min": round(walk["minutes"] + ride_min + config.TRANSIT_WAIT_MIN, 1),
                 "wave": _wave(city, ra) + _wave(city, rb),
-                "nav": {"legs": [nav.leg(city, ra), nav.leg(city, rb)], "ride_stops": nav.ride_stops(city, ride_line, A, B),
+                "nav": {"legs": [nav.leg(city, ra, a_end=_kerb_side(city.proj, ride_line, False)), nav.leg(city, rb, a_start=_kerb_side(city.proj, ride_line, True))], "ride_stops": nav.ride_stops(city, ride_line, A, B),
                         "ride_segs": [[sg[0], sg[1], sg[3] if len(sg) > 3 else 0] for sg in ride_segs], "ride_len": round(ride_m or 0, 1),
                         "side": [round(_stop_side(city.proj, ride_line, A, False), 1), round(_stop_side(city.proj, ride_line, B, True), 1)]},
                 "expanded": da["expanded"] + db["expanded"],

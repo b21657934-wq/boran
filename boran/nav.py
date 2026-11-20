@@ -179,17 +179,23 @@ def _allowed(ed, forward):
     return (1, -1)
 
 
-def sides(city, nodes, edges):
+def sides(city, nodes, edges, a_start=None, a_end=None):
     n = len(edges)
     if not n:
-        return [], []
+        return [], [], None, None
     fwd = [city.edges[ei]["u"] == nodes[k] for k, ei in enumerate(edges)]
     allow = [_allowed(city.edges[ei], fwd[k]) for k, ei in enumerate(edges)]
     rays = [_rays(city, nodes[k + 1]) for k in range(n - 1)]
     ang_in = [_bearing(*_away(city, nodes[k + 1], edges[k], 15.0)) for k in range(n - 1)]
     ang_out = [_bearing(*_away(city, nodes[k + 1], edges[k + 1], 15.0)) for k in range(n - 1)]
     bias = lambda s: 0.05 if s < 0 else 0.0
-    best = [{s: (bias(s), None) for s in allow[0]}]
+    r0 = _rays(city, nodes[0]) if a_start is not None else None
+    b0 = _bearing(*_away(city, nodes[0], edges[0], 15.0))
+    head = lambda s: junction(r0, a_start, leave(b0, s)) if r0 is not None else (0.0, [], [])
+    rn = _rays(city, nodes[-1]) if a_end is not None else None
+    bn = _bearing(*_away(city, nodes[-1], edges[-1], 15.0))
+    tail = lambda s: junction(rn, arrive(bn, s), a_end) if rn is not None else (0.0, [], [])
+    best = [{s: (bias(s) + head(s)[0], None) for s in allow[0]}]
     for k in range(1, n):
         row = {}
         for s in allow[k]:
@@ -201,14 +207,14 @@ def sides(city, nodes, edges):
                     choice = (tot, p)
             row[s] = choice
         best.append(row)
-    s = min(best[-1], key=lambda q: best[-1][q][0])
+    s = min(best[-1], key=lambda q: best[-1][q][0] + tail(q)[0])
     out = [s]
     for k in range(n - 1, 0, -1):
         s = best[k][s][1]
         out.append(s)
     out.reverse()
     plans = [junction(rays[k], arrive(ang_in[k], out[k]), leave(ang_out[k], out[k + 1])) for k in range(n - 1)]
-    return out, plans
+    return out, plans, head(out[0]), tail(out[-1])
 
 
 def _to_ll(city, v, q):
@@ -227,14 +233,31 @@ def drive_segs(city, res):
     return segs
 
 
-def leg(city, res):
+def leg(city, res, a_start=None, a_end=None):
     if res is None or not res.get("edges"):
         return {"segs": [], "cross": [], "turns": [], "via": [], "length": 0}
     sg = signals(city)
     nodes = res["nodes"]
     edges = res["edges"]
-    side, plans = sides(city, nodes, edges)
+    side, plans, first, last = sides(city, nodes, edges, a_start, a_end)
     segs, cross, turns, via = [], [], [], []
+
+    def crossing_at(v, d, plan):
+        _, crossed, pts = plan
+        if not crossed:
+            return
+        via.append({"d": round(d, 1), "pts": [_to_ll(city, v, q) for q in pts]})
+        x, y = _xy(city, city.nodes[v])
+        for r, a, b in zip(crossed, pts, pts[1:]):
+            if r["hw"] not in CARS:
+                continue
+            mid = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+            signal = (v in sg.nodes or sg.near(x, y)) if sg.known else r["hw"] in ("trunk", "primary", "secondary")
+            cross.append({"at": _to_ll(city, v, mid), "road": round(r["b"], 1), "hw": r["hw"], "lanes": CARS[r["hw"]],
+                          "half": r["half"], "ow": r["ow"], "sig": bool(signal), "zebra": v in sg.zebra,
+                          "name": _name(city, city.edges[r["e"]]), "d": round(d, 1)})
+
+    crossing_at(nodes[0], 0.0, first)
     dist = 0.0
     cur = nodes[0]
     for k, ei in enumerate(edges):
@@ -244,18 +267,7 @@ def leg(city, res):
         dist += ed["len"]
         if k < len(edges) - 1:
             e2 = edges[k + 1]
-            _, crossed, pts = plans[k]
-            if crossed:
-                via.append({"d": round(dist, 1), "pts": [_to_ll(city, nxt, q) for q in pts]})
-                for r, a, b in zip(crossed, pts, pts[1:]):
-                    if r["hw"] not in CARS:
-                        continue
-                    x, y = _xy(city, city.nodes[nxt])
-                    mid = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
-                    signal = (nxt in sg.nodes or sg.near(x, y)) if sg.known else r["hw"] in ("trunk", "primary", "secondary")
-                    cross.append({"at": _to_ll(city, nxt, mid), "road": round(r["b"], 1), "hw": r["hw"], "lanes": CARS[r["hw"]],
-                                  "half": r["half"], "ow": r["ow"], "sig": bool(signal), "zebra": nxt in sg.zebra,
-                                  "name": _name(city, city.edges[r["e"]]), "d": round(dist, 1)})
+            crossing_at(nxt, dist, plans[k])
             din = _away(city, nxt, ei, 15.0)
             dout = _away(city, nxt, e2, 15.0)
             hin = _bearing(-din[0], -din[1])
@@ -269,6 +281,7 @@ def leg(city, res):
                 else:
                     turns.append({"d": round(dist, 1), "turn": kind, "onto": onto, "at": city.nodes[nxt]})
         cur = nxt
+    crossing_at(cur, dist, last)
     return {"segs": segs, "cross": _merge_divided(cross), "turns": turns, "via": via, "length": round(dist, 1)}
 
 

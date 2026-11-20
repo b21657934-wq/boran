@@ -517,7 +517,7 @@
     map.on('error', (ev) => { if (ev && ev.error && /style|layers\[/.test(String(ev.error.message))) console.warn(ev.error.message); });
     window.__map = map;
     if (NAV) NAV.stop(true);
-    NAV = window.BoranNav ? window.BoranNav.create({ map, t, isNight, lang: () => S.lang, onStart: navStart, onExit: navExit, roadsNear, onShare: () => openShare('arrived') }) : null;
+    NAV = window.BoranNav ? window.BoranNav.create({ map, t, isNight, lang: () => S.lang, onStart: navStart, onExit: navExit, onView: (v) => { S.windK = v === 'fp' ? 0 : 0.3; }, roadsNear, onShare: () => openShare('arrived') }) : null;
     if (!NIGHT && window.BoranNight) NIGHT = window.BoranNight.create({ map: () => map, t, version: () => S.args && S.args.nightV,
       setRisk: (tb) => { S.nightRisk = tb; S.riskTable = tb || (S.args && S.args.riskTable); pushRisk(); },
       onOpen: () => { if (NAV && NAV.active()) NAV.stop(); if (HALL) HALL.close(); $('brain').hidden = true; $('marks').hidden = true; closeAlgos(); $('panel').classList.add('min'); $('btn-night').setAttribute('aria-pressed', 'true'); },
@@ -1184,7 +1184,7 @@
     if (!map || !map.getStyle()) return;
     map.getStyle().layers.forEach((L) => { if (NAV_HIDE.test(L.id)) map.setLayoutProperty(L.id, 'visibility', show ? 'visible' : 'none'); });
   }
-  function navStart() { if (NIGHT) NIGHT.close(); if (HALL) HALL.close(); closeAlgos(); $('brain').hidden = true; $('marks').hidden = true; navLayers(false); S.windK = 0.5; }
+  function navStart() { if (NIGHT) NIGHT.close(); if (HALL) HALL.close(); closeAlgos(); $('brain').hidden = true; $('marks').hidden = true; navLayers(false); S.windK = 0.3; }
   function navExit() { navLayers(true); S.windK = 1; const r = S.wantRoute && S.args.route; if (r) fitRoute(r); renderAll(); }
   window.__boranWalk = (r) => startWalk(r || (S.args && S.args.route));
   window.__boranNav = () => NAV;

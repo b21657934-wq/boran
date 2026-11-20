@@ -95,7 +95,7 @@
     const offAt = (s) => { const sg = segAt(s); if (!sg || !WIDTH[sg[1]]) return 0; const side = sg.length > 4 && sg[4] ? sg[4] : 1; return side * (halfOf(sg[1], sg[3]) + 2.0); };
     const nearestIdx = (sb) => { let lo = 0, hi = n - 1; while (hi - lo > 1) { const md = (lo + hi) >> 1; if (C[md] <= sb) lo = md; else hi = md; } return Math.abs(C[lo] - sb) <= Math.abs(C[hi] - sb) ? lo : hi; };
     const viaAt = new Map();
-    ((plan && plan.via) || []).forEach((v) => { const i = nearestIdx(pre + v.d * scale); if (i > 0 && i < n - 1) viaAt.set(i, v.pts.map((q) => F.xy(q))); });
+    ((plan && plan.via) || []).forEach((v) => { viaAt.set(nearestIdx(pre + v.d * scale), v.pts.map((q) => F.xy(q))); });
     const ahead = (i) => { let j = i + 1; while (j < n - 1 && C[j] - C[i] < 2.5) j++; return j; };
     const K = [0];
     for (let i = 1; i < n - 1; i++) {
@@ -141,7 +141,7 @@
     }
     const pts = [], KC = [], cuts = [];
     for (let k = 0; k < m; k++) {
-      const vp = k > 0 && k < m - 1 ? viaAt.get(K[k]) : null;
+      const vp = viaAt.get(K[k]);
       if (vp) vp.forEach((q, j) => { if (j > 0) cuts.push(pts.length - 1); pts.push(q); KC.push(C[K[k]]); });
       else { pts.push(out[k]); KC.push(C[K[k]]); }
     }
@@ -226,10 +226,16 @@
       map.addSource('n-glass', { type: 'geojson', data: FC([]), maxzoom: 20 });
       map.addSource('n-labels', { type: 'geojson', data: FC([]) });
       map.addSource('n-marks', { type: 'geojson', data: FC([]), maxzoom: 20 });
+      map.addSource('n-streets', { type: 'geojson', data: FC([]), maxzoom: 20 });
+      const MW = (e) => ['interpolate', ['exponential', 2], ['zoom'], 10, ['*', e, 0.02085], 24, ['*', e, 341.6]];
+      const SC = night() ? { s: '#2A3446', k: '#56637A', a: '#0F141D' } : { s: '#C7CED6', k: '#E9EDF1', a: '#5D6670' };
       const W = (m) => ['interpolate', ['exponential', 2], ['zoom'], 14, m * 0.2, 22, m * 51];
       const MC = night() ? '#AEB9CC' : '#FFFFFF';
       map.addLayer({ id: 'n-mark-solid', type: 'line', source: 'n-marks', minzoom: 16, filter: ['==', ['get', 'd'], 0], paint: { 'line-color': MC, 'line-opacity': 0.9, 'line-width': W(0.14) } }, before);
       map.addLayer({ id: 'n-mark-dash', type: 'line', source: 'n-marks', minzoom: 16, filter: ['==', ['get', 'd'], 1], paint: { 'line-color': MC, 'line-opacity': 0.85, 'line-width': W(0.14), 'line-dasharray': [20, 40] } }, before);
+      map.addLayer({ id: 'n-sw', type: 'line', source: 'n-streets', minzoom: 15, filter: ['==', ['get', 'k'], 's'], layout: { 'line-cap': 'butt', 'line-join': 'round' }, paint: { 'line-color': SC.s, 'line-width': MW(['get', 'w']), 'line-offset': MW(['get', 'o']) } }, 'n-mark-solid');
+      map.addLayer({ id: 'n-kerb', type: 'line', source: 'n-streets', minzoom: 15, filter: ['==', ['get', 'k'], 'k'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': SC.k, 'line-width': MW(['get', 'w']) } }, 'n-mark-solid');
+      map.addLayer({ id: 'n-asph', type: 'line', source: 'n-streets', minzoom: 15, filter: ['==', ['get', 'k'], 'a'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': SC.a, 'line-width': MW(['get', 'w']) } }, 'n-mark-solid');
       map.addLayer({ id: 'n-flat', type: 'fill', source: 'n-flat', paint: { 'fill-color': ['get', 'c'], 'fill-opacity': ['get', 'o'] } }, before);
       map.addLayer({ id: 'n-walk', type: 'line', source: 'n-walk', filter: ['==', ['get', 'k'], 'side'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': night() ? '#1F2A3D' : '#DCE3EA', 'line-width': W(2.8) } }, before);
       const GW = (k) => ['interpolate', ['exponential', 2], ['zoom'], 14, 3 * k, 17, 6 * k, 19, 10 * k, 21, 18 * k, 23, 60 * k];
@@ -244,8 +250,8 @@
       if (run) { run.staticDirty = true; run.flatDirty = true; run.walkDirty = true; }
     }
     function removeLayers() {
-      ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-done', 'n-guide', 'n-guide-case', 'n-walk', 'n-flat', 'n-mark-solid', 'n-mark-dash'].forEach((id) => { if (map.getLayer(id)) map.removeLayer(id); });
-      ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-walk', 'n-flat', 'n-marks'].forEach((id) => { if (map.getSource(id)) map.removeSource(id); });
+      ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-done', 'n-guide', 'n-guide-case', 'n-walk', 'n-flat', 'n-asph', 'n-kerb', 'n-sw', 'n-mark-solid', 'n-mark-dash'].forEach((id) => { if (map.getLayer(id)) map.removeLayer(id); });
+      ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-walk', 'n-flat', 'n-marks', 'n-streets'].forEach((id) => { if (map.getSource(id)) map.removeSource(id); });
     }
     const FC = (f) => ({ type: 'FeatureCollection', features: f });
     const setData = (id, f) => { const s = map.getSource(id); if (s) s.setData(FC(f)); };
@@ -483,6 +489,22 @@
       for (let s = Math.max(0, bs - 2); s <= Math.min(path.len, bs + 2); s += 0.25) { const q = path.pos(s), d = Math.hypot(q[0] - pt[0], q[1] - pt[1]); if (d < best) { best = d; bs = s; } }
       return [bs, best];
     }
+    function streetFeats(rows) {
+      const out = [];
+      const feat = (coords, props) => out.push({ type: 'Feature', properties: props, geometry: { type: 'LineString', coordinates: coords } });
+      for (const r of rows) {
+        const ow = r.ow ? 1 : 0, half = halfOf(r.hw, ow);
+        if (!half || r.p.length < 2) continue;
+        const coords = r.ow === -1 ? r.p.slice().reverse() : r.p;
+        feat(coords, { k: 'a', w: 2 * half });
+        feat(coords, { k: 'k', w: 2 * half + 0.5 });
+        const o = half + 0.25 + 1.6;
+        feat(coords, { k: 's', w: 3.2, o });
+        if (!ow) feat(coords, { k: 's', w: 3.2, o: -o });
+      }
+      return out;
+    }
+
     function strokesFrom(rows) {
       const F = run.F;
       const E = rows.map((r) => { let p = r.p; if (r.ow === -1) p = p.slice().reverse(); return { p, xy: p.map((q) => F.xy(q)), hw: r.hw, ow: r.ow ? 1 : 0, used: false }; });
@@ -552,6 +574,7 @@
       const rows = ctx.roadsNear(F.ll(W), 340);
       if (!rows.length) return false;
       const strokes = strokesFrom(rows);
+      setData('n-streets', streetFeats(rows));
       const keep = new Map();
       const crosses = ph.crossings.filter((X) => X.sOut > run.s - 40 && X.sIn < run.s + 300);
       const look = [];
@@ -1070,6 +1093,7 @@
       if (!fp) run.hud.frame.hidden = true;
       run.nz = null; run.np = null; run.na = null; run.nb = null; run.camInit = false;
       run.walkDirty = true;
+      if (ctx.onView) ctx.onView(run.view);
     }
 
     function seek(frac) {

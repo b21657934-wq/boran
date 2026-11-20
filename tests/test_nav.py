@@ -50,15 +50,15 @@ def test_traffic_direction_flag():
 
 def test_against_traffic_walks_on_the_outer_side():
     city = divided()
-    side, _ = nav.sides(city, [0, 1, 2], [1, 0])
+    side = nav.sides(city, [0, 1, 2], [1, 0])[0]
     assert side == [-1, -1]
-    side, _ = nav.sides(city, [3, 4, 5], [2, 3])
+    side = nav.sides(city, [3, 4, 5], [2, 3])[0]
     assert side == [1, 1]
 
 
 def test_two_way_road_gets_a_side_and_oneway_keeps_its_outer_side():
     city = divided()
-    side, _ = nav.sides(city, [6, 1, 0], [4, 1])
+    side = nav.sides(city, [6, 1, 0], [4, 1])[0]
     assert side[0] in (1, -1) and side[1] == 1
 
 
@@ -107,3 +107,11 @@ def test_walk_path_keeps_to_the_outer_sidewalk(tmp_path):
         "console.log(JSON.stringify(xs));\n")
     xs = json.loads(subprocess.run(["node", str(script)], capture_output=True, text=True, check=True).stdout)
     assert xs and all(x < -10 - 3.5 - 1.0 for x in xs)
+
+
+def test_walk_to_a_stop_ends_on_the_stop_kerb():
+    city = divided()
+    same = nav.leg(city, {"nodes": [2, 1], "edges": [0]}, a_end=300.0)
+    other = nav.leg(city, {"nodes": [2, 1], "edges": [0]}, a_end=135.0)
+    assert same["segs"][0][4] == 1 and not same["via"]
+    assert other["via"] and other["via"][-1]["d"] == other["length"] and len(other["via"][-1]["pts"]) == 3
