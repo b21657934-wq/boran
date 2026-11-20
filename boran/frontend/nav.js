@@ -227,6 +227,7 @@
       map.addSource('n-labels', { type: 'geojson', data: FC([]) });
       map.addSource('n-marks', { type: 'geojson', data: FC([]), maxzoom: 20 });
       map.addSource('n-streets', { type: 'geojson', data: FC([]), maxzoom: 20 });
+      map.addSource('n-shade', { type: 'geojson', data: FC([]), maxzoom: 20, tolerance: 0 });
       const MW = (e) => ['interpolate', ['exponential', 2], ['zoom'], 10, ['*', e, 0.02085], 24, ['*', e, 341.6]];
       const SC = night() ? { s: '#2A3446', k: '#56637A', a: '#0F141D' } : { s: '#C7CED6', k: '#E9EDF1', a: '#5D6670' };
       const W = (m) => ['interpolate', ['exponential', 2], ['zoom'], 14, m * 0.2, 22, m * 51];
@@ -237,6 +238,7 @@
       map.addLayer({ id: 'n-kerb', type: 'line', source: 'n-streets', minzoom: 15, filter: ['==', ['get', 'k'], 'k'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': SC.k, 'line-width': MW(['get', 'w']) } }, 'n-mark-solid');
       map.addLayer({ id: 'n-asph', type: 'line', source: 'n-streets', minzoom: 15, filter: ['==', ['get', 'k'], 'a'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': SC.a, 'line-width': MW(['get', 'w']) } }, 'n-mark-solid');
       map.addLayer({ id: 'n-flat', type: 'fill', source: 'n-flat', paint: { 'fill-color': ['get', 'c'], 'fill-opacity': ['get', 'o'] } }, before);
+      map.addLayer({ id: 'n-shade', type: 'fill', source: 'n-shade', minzoom: 16, paint: { 'fill-color': night() ? '#000000' : '#1B2633', 'fill-opacity': night() ? 0.3 : 0.17, 'fill-antialias': false } }, before);
       map.addLayer({ id: 'n-walk', type: 'line', source: 'n-walk', filter: ['==', ['get', 'k'], 'side'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': night() ? '#1F2A3D' : '#DCE3EA', 'line-width': W(2.8) } }, before);
       const GW = (k) => ['interpolate', ['exponential', 2], ['zoom'], 14, 3 * k, 17, 6 * k, 19, 10 * k, 21, 18 * k, 23, 60 * k];
       map.addLayer({ id: 'n-guide-case', type: 'line', source: 'n-walk', filter: ['==', ['get', 'k'], 'guide'], layout: { 'line-cap': 'round', 'line-join': 'round', visibility: run && run.view === 'fp' ? 'none' : 'visible' }, paint: { 'line-color': night() ? '#0B1220' : '#FFFFFF', 'line-width': GW(1.7) } }, before);
@@ -250,8 +252,8 @@
       if (run) { run.staticDirty = true; run.flatDirty = true; run.walkDirty = true; }
     }
     function removeLayers() {
-      ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-done', 'n-guide', 'n-guide-case', 'n-walk', 'n-flat', 'n-asph', 'n-kerb', 'n-sw', 'n-mark-solid', 'n-mark-dash'].forEach((id) => { if (map.getLayer(id)) map.removeLayer(id); });
-      ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-walk', 'n-flat', 'n-marks', 'n-streets'].forEach((id) => { if (map.getSource(id)) map.removeSource(id); });
+      ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-done', 'n-guide', 'n-guide-case', 'n-walk', 'n-shade', 'n-flat', 'n-asph', 'n-kerb', 'n-sw', 'n-mark-solid', 'n-mark-dash'].forEach((id) => { if (map.getLayer(id)) map.removeLayer(id); });
+      ['n-labels', 'n-dyn', 'n-glass', 'n-static', 'n-walk', 'n-shade', 'n-flat', 'n-marks', 'n-streets'].forEach((id) => { if (map.getSource(id)) map.removeSource(id); });
     }
     const FC = (f) => ({ type: 'FeatureCollection', features: f });
     const setData = (id, f) => { const s = map.getSource(id); if (s) s.setData(FC(f)); };
@@ -279,6 +281,7 @@
       const L = 220, zs = L / 2;
       const X = { id: 'x' + idx, c, u, nL, Zr, sIn, sOut, sMid, half: c.half, sig: c.sig, lanes: [], offset: rnd() * CYCLE_T, yield: false, hw: c.hw, name: c.name };
       X.carRed = () => {
+        if (X.pedsOn > 0) return true;
         if (!X.sig) return X.yield;
         const ph = X.phase(run ? run.wt : 0);
         return ph.name !== 'x';
@@ -367,11 +370,31 @@
       if (hat) out.push(ext(disc(F, p, 0.15, 8), 1.62 + bob, 1.8 + bob, '#2B2F38'));
     }
     function carFeats(F, pl, car, out) {
-      out.push(ext(rect(F, pl.p, pl.h, car.len, car.wid), 0.22, car.hgt > 2 ? 2.1 : 0.95, car.c));
-      if (car.hgt <= 2) out.push(ext(rect(F, pl.p, pl.h, car.len * 0.52, car.wid * 0.86, car.len * 0.06), 0.95, 1.45, '#2A3340'));
-      const f = [Math.sin(pl.h * RAD), Math.cos(pl.h * RAD)];
-      const front = [pl.p[0] + f[0] * (car.len / 2 - 0.05), pl.p[1] + f[1] * (car.len / 2 - 0.05)];
-      out.push(ext(rect(F, front, pl.h, 0.1, car.wid * 0.9), 0.55, 0.75, night() ? '#FFF6D8' : '#DDE3EA'));
+      const f = [Math.sin(pl.h * RAD), Math.cos(pl.h * RAD)], r = [f[1], -f[0]];
+      const at = (u) => [pl.p[0] + f[0] * u, pl.p[1] + f[1] * u];
+      const big = car.hgt > 2, L = car.len, Wd = car.wid, glass = night() ? '#141B26' : '#33404F';
+      const wu = L / 2 - (big ? 1.15 : 0.9);
+      for (const u of [-wu, wu]) out.push(ext(rect(F, at(u), pl.h, 0.64, Wd + 0.02), 0, 0.46, '#15181D'));
+      if (big) {
+        out.push(ext(rect(F, pl.p, pl.h, L, Wd), 0.3, 2.15, car.c));
+        out.push(ext(rect(F, at(L / 2 - 0.02), pl.h, 0.06, Wd * 0.88), 1.2, 1.95, glass));
+        out.push(ext(rect(F, at(L / 2 - 1.1), pl.h, 1.9, Wd + 0.02), 1.25, 1.85, glass));
+      } else {
+        out.push(ext(rect(F, pl.p, pl.h, L, Wd), 0.3, 0.92, car.c));
+        out.push(ext(rect(F, at(-L * 0.05), pl.h, L * 0.5, Wd * 0.9), 0.92, 1.3, glass));
+        out.push(ext(rect(F, at(-L * 0.06), pl.h, L * 0.42, Wd * 0.86), 1.3, 1.44, car.c));
+      }
+      out.push(ext(rect(F, at(L / 2 - 0.03), pl.h, 0.08, Wd * 0.92), 0.58, 0.76, night() ? '#FFF6D8' : '#DDE3EA'));
+      out.push(ext(rect(F, at(-L / 2 + 0.03), pl.h, 0.08, Wd * 0.92), 0.64, 0.8, night() ? '#FF3B3B' : '#B3242C'));
+    }
+    const SUN = [0.28, 0.96];
+    function shadowFeats(F, p, h, len, wid, tall, out) {
+      const k = Math.min(2.2, tall * 0.9);
+      out.push(flat(rect(F, [p[0] + SUN[0] * k * 0.5, p[1] + SUN[1] * k * 0.5], h, len + 0.2, wid + 0.2), '#000', 1));
+    }
+    function personShadow(F, p, out) {
+      const hd = headingOf(SUN);
+      out.push(flat(rect(F, [p[0] + SUN[0] * 0.75, p[1] + SUN[1] * 0.75], hd, 1.5, 0.42), '#000', 1));
     }
     function busFeats(F, pos, h, out, open) {
       const f = [Math.sin(h * RAD), Math.cos(h * RAD)], r = [f[1], -f[0]];
@@ -848,6 +871,64 @@
       return false;
     }
 
+    function pedFree(ph, s) {
+      if (s < 3 || s > ph.walk.path.len - 3) return false;
+      for (const X of ph.crossings) if (s > X.sIn - 4 && s < X.sOut + 4) return false;
+      return true;
+    }
+    function pedSpawn(s, d) {
+      const rnd = run.rnd;
+      run.peds.push({ s, d, v: WALK * BASE * (d > 0 ? 0.56 + rnd() * 0.16 : 0.72 + rnd() * 0.22), lat: (d > 0 ? -0.95 : 0.95) + (rnd() - 0.5) * 0.3,
+        coat: COATS[Math.floor(rnd() * COATS.length)], hat: rnd() < 0.6, ph: rnd() * 6.28, kerb: 0.5 + rnd() * 1.5, onX: null, hold: false });
+    }
+    function pedGo(X) {
+      if (X.flow.some(({ lane, sz }) => lane.cars.some((c) => Math.abs(c.s - sz) < c.len / 2 + 2.6))) return false;
+      if (X.sig) { const q = X.phase(run.wt); return q.name === 'p' && q.left > 4; }
+      return X.passing || X.flow.every(({ lane, sz }) => lane.cars.every((c) => { const front = c.s + c.len / 2; return front > sz + 2 || front < sz - 32 || c.v < 0.6; }));
+    }
+    function pedLeave(p) { if (p.onX) { p.onX.pedsOn = Math.max(0, (p.onX.pedsOn || 0) - 1); p.onX = null; } }
+    function stepPeds(ph, dtw) {
+      if (!run.peds) run.peds = [];
+      const L = ph.walk.path.len, lo = Math.max(0, run.s - 35), hi = Math.min(L, run.s + 210);
+      run.peds = run.peds.filter((p) => { const keep = p.s > run.s - 38 && p.s < run.s + 230 && p.s > 0.5 && p.s < L - 0.5; if (!keep) pedLeave(p); return keep; });
+      const want = Math.max(0, Math.round((hi - lo) / 24));
+      if (!run.pedInit) {
+        run.pedInit = true;
+        for (let k = 0; k < want * 2 && run.peds.length < want; k++) {
+          const s = lo + run.rnd() * (hi - lo);
+          if (pedFree(ph, s) && Math.abs(s - run.s) > 5) pedSpawn(s, run.rnd() < 0.62 ? -1 : 1);
+        }
+      } else if (run.peds.length < want) {
+        run.pedT = (run.pedT || 0) - dtw;
+        if (run.pedT <= 0) {
+          run.pedT = 0.5 + run.rnd() * 1.4;
+          let s = run.s + 185 + run.rnd() * 25;
+          for (let g = 0; g < 12 && s < L && !pedFree(ph, s); g++) s += 3;
+          if (pedFree(ph, s)) pedSpawn(s, run.rnd() < 0.65 ? -1 : 1);
+        }
+      }
+      for (const p of run.peds) {
+        let target = p.s + p.d * p.v * dtw;
+        p.hold = false;
+        if (p.onX) {
+          if (p.d > 0 ? p.s > p.onX.sOut + 0.6 : p.s < p.onX.sIn - 0.6) pedLeave(p);
+        } else {
+          for (const X of ph.crossings) {
+            const kerb = p.d > 0 ? X.sIn - p.kerb : X.sOut + p.kerb;
+            const before = p.d > 0 ? p.s <= kerb + 0.01 : p.s >= kerb - 0.01;
+            const reach = p.d > 0 ? target >= kerb : target <= kerb;
+            if (!before || !reach) continue;
+            if (pedGo(X)) { p.onX = X; X.pedsOn = (X.pedsOn || 0) + 1; }
+            else { target = kerb; p.hold = true; }
+            break;
+          }
+        }
+        if (!p.hold) p.ph += (Math.abs(target - p.s) / 0.72) * Math.PI;
+        p.s = target;
+      }
+    }
+    function pedsReset() { (run.peds || []).forEach(pedLeave); run.peds = []; run.pedInit = false; run.pedT = 0; }
+
     function stepStop(ph, dtW) {
       const T = strings(), st = ph.stop;
       run.stopT = (run.stopT || 0) + dtW;
@@ -931,10 +1012,19 @@
     }
 
     function dynamic() {
-      const F = run.F, out = [], ph = run.plan.phases[run.i];
+      const F = run.F, out = [], shade = [], ph = run.plan.phases[run.i];
       const lanes = [];
       if (ph && ph.type === 'walk') lanes.push(...trafficLanes());
-      lanes.forEach((L) => L.cars.forEach((c) => carFeats(F, L.place(c.s), c, out)));
+      lanes.forEach((L) => L.cars.forEach((c) => { const pl = L.place(c.s); carFeats(F, pl, c, out); shadowFeats(F, pl.p, pl.h, c.len, c.wid, c.hgt, shade); }));
+      if (ph && ph.type === 'walk' && run.peds) {
+        const path = ph.walk.path;
+        for (const q of run.peds) {
+          const c = path.pos(q.s), t = path.tangent(q.s, 2), n = [-t[1], t[0]];
+          const p = [c[0] + n[0] * q.lat, c[1] + n[1] * q.lat];
+          personFeats(F, p, q.coat, q.hat, out, q.hold ? Math.sin(run.wt * 2 + q.ph) * 0.012 : Math.abs(Math.sin(q.ph)) * 0.04);
+          personShadow(F, p, shade);
+        }
+      }
       run.plan.phases.forEach((p) => {
         if (p.type === 'walk') p.crossings.forEach((X) => {
           if (!X.sig || !X.heads) return;
@@ -947,7 +1037,7 @@
             out.push(ext(rect(F, hd.at, h, 0.26, 0.26), b0, b0 + 0.5, col));
           });
         });
-        if (p.type === 'stop' || p.type === 'alight') p.stop.people.forEach((q, i) => { if (!q.gone) personFeats(F, q.p, q.coat, q.hat, out, Math.sin(run.wt * 2 + q.ph) * 0.015); });
+        if (p.type === 'stop' || p.type === 'alight') p.stop.people.forEach((q, i) => { if (!q.gone) { personFeats(F, q.p, q.coat, q.hat, out, Math.sin(run.wt * 2 + q.ph) * 0.015); personShadow(F, q.p, shade); } });
       });
       const bus = run.bus;
       const cur = run.plan.phases[run.i];
@@ -955,8 +1045,10 @@
         const path = bus.path, t = path.tangent(bus.s - 6, 6), r = [t[1], -t[0]], p = path.pos(bus.s - 6);
         const lo = path.lane ? path.lane(bus.s - 6) : 3.6;
         busFeats(F, [p[0] + r[0] * lo, p[1] + r[1] * lo], headingOf(t), out, bus.state === 'board' || (cur.type === 'alight' && (run.alT || 0) < 1.2));
+        shadowFeats(F, [p[0] + r[0] * lo, p[1] + r[1] * lo], headingOf(t), 12, 2.55, 3.05, shade);
       }
       setData('n-dyn', out);
+      setData('n-shade', shade);
     }
 
     function tick(now) {
@@ -981,6 +1073,7 @@
         run.lanes = lanes;
         lanes.forEach((L) => L.step(dtW, run.wt, run.rnd));
         done = stepWalk(ph, dtw, dtW);
+        stepPeds(ph, dtw);
         run.walkT = (run.walkT || 0) + dtR;
         if (run.walkT > 0.35 || run.walkDirty) { run.walkT = 0; run.walkDirty = false; walkLines(); }
       } else if (ph.type === 'stop') { done = stepStop(ph, dtW); setSig(null); }
@@ -1001,7 +1094,7 @@
       const ph = run.plan.phases[run.i];
       if (ph.type === 'stop') { run.fromCam = Object.assign({}, run.cam); run.bus.rideT = 0; }
       if (ph.type === 'ride') { run.fromCam = Object.assign({}, run.cam); run.alT = 0; run.bus.v = 0; }
-      if (ph.type === 'walk') { cool(run.lanes); run.lanes = []; run.traffic = null; run.trKey = null; setData('n-marks', []); }
+      if (ph.type === 'walk') { cool(run.lanes); run.lanes = []; run.traffic = null; run.trKey = null; setData('n-marks', []); pedsReset(); }
       run.i += 1; run.s = 0; run.stopT = 0;
       const nx = run.plan.phases[run.i];
       if (nx && nx.type === 'walk' && run.i > 0) { run.walkDirty = true; }
@@ -1101,6 +1194,7 @@
       const lens = phs.map((ph) => (ph.type === 'walk' ? ph.walk.path.len : ph.type === 'ride' ? ph.end - ph.start : ph.type === 'stop' ? 300 : 0));
       let target = frac * lens.reduce((a, b) => a + b, 0);
       if (run.i < phs.length && phs[run.i].type === 'walk') { cool(run.lanes); run.lanes = []; }
+      pedsReset();
       run.traffic = null; run.trKey = null;
       for (let i = 0; i < phs.length; i++) {
         if (target <= lens[i] || i === phs.length - 1) {
