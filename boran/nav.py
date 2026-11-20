@@ -71,37 +71,6 @@ def _name(city, ed):
     return names[n] if 0 <= n < len(names) else ""
 
 
-def _crossing(city, v, e_in, e_out, sg):
-    roads = [ei for _, ei in city.adj[v] if ei not in (e_in, e_out) and city.edges[ei]["hw"] in CARS]
-    if len(roads) < 2:
-        return None
-    best = None
-    for i in range(len(roads)):
-        for j in range(i + 1, len(roads)):
-            a, b = roads[i], roads[j]
-            da, db = _away(city, v, a), _away(city, v, b)
-            if da[0] * db[0] + da[1] * db[1] > -0.5:
-                continue
-            rank = max(RANK[city.edges[a]["hw"]], RANK[city.edges[b]["hw"]])
-            if best is None or rank > best[0]:
-                best = (rank, a, b, da, db)
-    if best is None:
-        return None
-    _, a, b, da, db = best
-    road = _unit(db[0] - da[0], db[1] - da[1])
-    vin, vout = _away(city, v, e_in), _away(city, v, e_out)
-    side_in = road[0] * vin[1] - road[1] * vin[0]
-    side_out = road[0] * vout[1] - road[1] * vout[0]
-    if side_in * side_out >= 0 or min(abs(side_in), abs(side_out)) < 0.35:
-        return None
-    hw = city.edges[a]["hw"] if RANK[city.edges[a]["hw"]] >= RANK[city.edges[b]["hw"]] else city.edges[b]["hw"]
-    x, y = _xy(city, city.nodes[v])
-    signal = (v in sg.nodes or sg.near(x, y)) if sg.known else hw in ("trunk", "primary", "secondary")
-    ow = bool(city.edges[a].get("ow")) and bool(city.edges[b].get("ow"))
-    return {"at": city.nodes[v], "road": round(_bearing(*road), 1), "hw": hw, "lanes": CARS[hw], "half": half_width(hw, ow), "ow": ow,
-            "sig": bool(signal), "zebra": v in sg.zebra, "name": _name(city, city.edges[a]) or _name(city, city.edges[b])}
-
-
 def _turn(delta):
     a = abs(delta)
     if a < 35:
@@ -112,26 +81,181 @@ def _turn(delta):
     return ("slight_" + side) if a < 60 else side
 
 
+def _traffic(ow, forward):
+    if not ow:
+        return 0
+    return 1 if (ow == 1) == forward else -1
+
+
+SIDEWALK = 2.0
+
+
+def _cw(a, b):
+    return (b - a) % 360.0
+
+
+def _rays(city, v):
+    out, seen = [], set()
+    for _, ei in city.adj[v]:
+        ed = city.edges[ei]
+        if ed["hw"] not in WIDTH or ei in seen:
+            continue
+        seen.add(ei)
+        d = _away(city, v, ei, 15.0)
+        if d == (0.0, 0.0):
+            continue
+        out.append({"e": ei, "b": _bearing(*d), "d": d, "half": half_width(ed["hw"], bool(ed.get("ow"))), "hw": ed["hw"], "ow": bool(ed.get("ow"))})
+    return out
+
+
+def _cost(r):
+    return 1.0 + r["half"] / 7.0
+
+
+def sweep(rays, a0, a1):
+    span_cw, span_ccw = _cw(a0, a1), _cw(a1, a0)
+    cw = sorted((r for r in rays if 0.0 < _cw(a0, r["b"]) < span_cw), key=lambda r: _cw(a0, r["b"]))
+    ccw = sorted((r for r in rays if 0.0 < _cw(r["b"], a0) < span_ccw), key=lambda r: _cw(r["b"], a0))
+    c1, c2 = sum(_cost(r) for r in cw), sum(_cost(r) for r in ccw)
+    return (c1, cw, 1) if c1 <= c2 else (c2, ccw, -1)
+
+
+def arrive(b, side):
+    return (b - side) % 360.0
+
+
+def leave(b, side):
+    return (b + side) % 360.0
+
+
+def _sector(rays, a):
+    left = min(rays, key=lambda r: _cw(r["b"], a))
+    right = min(rays, key=lambda r: _cw(a, r["b"]))
+    return left, right
+
+
+def corner(rays, a):
+    left, right = _sector(rays, a)
+    ol, orr = left["half"] + SIDEWALK, right["half"] + SIDEWALK
+    dl, dr = left["d"], right["d"]
+    nl = (dl[1], -dl[0])
+    nr = (-dr[1], dr[0])
+    if left is right:
+        return (nl[0] * ol, nl[1] * ol)
+    cr = dl[0] * dr[1] - dl[1] * dr[0]
+    far = 3.0 * max(ol, orr) + 6.0
+    if abs(cr) > 0.2:
+        pl = (nl[0] * ol, nl[1] * ol)
+        pr = (nr[0] * orr, nr[1] * orr)
+        t = ((pr[0] - pl[0]) * dr[1] - (pr[1] - pl[1]) * dr[0]) / cr
+        q = (pl[0] + dl[0] * t, pl[1] + dl[1] * t)
+        if math.hypot(*q) <= far:
+            return q
+    bx, by = _unit(nl[0] + nr[0], nl[1] + nr[1])
+    if (bx, by) == (0.0, 0.0):
+        bx, by = nl
+    o = max(ol, orr)
+    return (bx * o, by * o)
+
+
+def junction(rays, a0, a1):
+    if not rays:
+        return 0.0, [], []
+    cost, crossed, way = sweep(rays, a0, a1)
+    if not crossed:
+        return 0.0, [], []
+    pts = [corner(rays, a0)]
+    for r in crossed:
+        pts.append(corner(rays, (r["b"] + 0.5 * way) % 360.0))
+    return cost, crossed, pts
+
+
+def _allowed(ed, forward):
+    if ed["hw"] not in WIDTH:
+        return (0,)
+    t = _traffic(ed.get("ow", 0), forward)
+    if t:
+        return (1 if t > 0 else -1,)
+    return (1, -1)
+
+
+def sides(city, nodes, edges):
+    n = len(edges)
+    if not n:
+        return [], []
+    fwd = [city.edges[ei]["u"] == nodes[k] for k, ei in enumerate(edges)]
+    allow = [_allowed(city.edges[ei], fwd[k]) for k, ei in enumerate(edges)]
+    rays = [_rays(city, nodes[k + 1]) for k in range(n - 1)]
+    ang_in = [_bearing(*_away(city, nodes[k + 1], edges[k], 15.0)) for k in range(n - 1)]
+    ang_out = [_bearing(*_away(city, nodes[k + 1], edges[k + 1], 15.0)) for k in range(n - 1)]
+    bias = lambda s: 0.05 if s < 0 else 0.0
+    best = [{s: (bias(s), None) for s in allow[0]}]
+    for k in range(1, n):
+        row = {}
+        for s in allow[k]:
+            choice = None
+            for p, (c, _) in best[k - 1].items():
+                jc = junction(rays[k - 1], arrive(ang_in[k - 1], p), leave(ang_out[k - 1], s))[0]
+                tot = c + jc + bias(s)
+                if choice is None or tot < choice[0] - 1e-9:
+                    choice = (tot, p)
+            row[s] = choice
+        best.append(row)
+    s = min(best[-1], key=lambda q: best[-1][q][0])
+    out = [s]
+    for k in range(n - 1, 0, -1):
+        s = best[k][s][1]
+        out.append(s)
+    out.reverse()
+    plans = [junction(rays[k], arrive(ang_in[k], out[k]), leave(ang_out[k], out[k + 1])) for k in range(n - 1)]
+    return out, plans
+
+
+def _to_ll(city, v, q):
+    x, y = _xy(city, city.nodes[v])
+    pr = city.proj
+    return [round((x + q[0]) / pr.kx + pr.lon0, 7), round((y + q[1]) / pr.ky + pr.lat0, 7)]
+
+
+def drive_segs(city, res):
+    segs, dist, cur = [], 0.0, res["nodes"][0]
+    for ei in res["edges"]:
+        ed = city.edges[ei]
+        segs.append([round(dist, 1), ed["hw"], _name(city, ed), 1 if ed.get("ow") else 0])
+        dist += ed["len"]
+        cur = ed["v"] if ed["u"] == cur else ed["u"]
+    return segs
+
+
 def leg(city, res):
     if res is None or not res.get("edges"):
-        return {"segs": [], "cross": [], "turns": [], "length": 0}
+        return {"segs": [], "cross": [], "turns": [], "via": [], "length": 0}
     sg = signals(city)
     nodes = res["nodes"]
     edges = res["edges"]
-    segs, cross, turns = [], [], []
+    side, plans = sides(city, nodes, edges)
+    segs, cross, turns, via = [], [], [], []
     dist = 0.0
     cur = nodes[0]
     for k, ei in enumerate(edges):
         ed = city.edges[ei]
         nxt = ed["v"] if ed["u"] == cur else ed["u"]
-        segs.append([round(dist, 1), ed["hw"], _name(city, ed), 1 if ed.get("ow") else 0])
+        segs.append([round(dist, 1), ed["hw"], _name(city, ed), 1 if ed.get("ow") else 0, side[k]])
         dist += ed["len"]
         if k < len(edges) - 1:
             e2 = edges[k + 1]
-            c = _crossing(city, nxt, ei, e2, sg)
-            if c:
-                c["d"] = round(dist, 1)
-                cross.append(c)
+            _, crossed, pts = plans[k]
+            if crossed:
+                via.append({"d": round(dist, 1), "pts": [_to_ll(city, nxt, q) for q in pts]})
+                for r, a, b in zip(crossed, pts, pts[1:]):
+                    if r["hw"] not in CARS:
+                        continue
+                    x, y = _xy(city, city.nodes[nxt])
+                    mid = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+                    signal = (nxt in sg.nodes or sg.near(x, y)) if sg.known else r["hw"] in ("trunk", "primary", "secondary")
+                    cross.append({"at": _to_ll(city, nxt, mid), "road": round(r["b"], 1), "hw": r["hw"], "lanes": CARS[r["hw"]],
+                                  "half": r["half"], "ow": r["ow"], "sig": bool(signal), "zebra": nxt in sg.zebra,
+                                  "name": _name(city, city.edges[r["e"]]), "d": round(dist, 1)})
             din = _away(city, nxt, ei, 15.0)
             dout = _away(city, nxt, e2, 15.0)
             hin = _bearing(-din[0], -din[1])
@@ -145,7 +269,7 @@ def leg(city, res):
                 else:
                     turns.append({"d": round(dist, 1), "turn": kind, "onto": onto, "at": city.nodes[nxt]})
         cur = nxt
-    return {"segs": segs, "cross": _merge_divided(cross), "turns": turns, "length": round(dist, 1)}
+    return {"segs": segs, "cross": _merge_divided(cross), "turns": turns, "via": via, "length": round(dist, 1)}
 
 
 def _merge_divided(cross):

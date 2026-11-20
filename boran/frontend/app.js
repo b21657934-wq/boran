@@ -1186,6 +1186,8 @@
   }
   function navStart() { if (NIGHT) NIGHT.close(); if (HALL) HALL.close(); closeAlgos(); $('brain').hidden = true; $('marks').hidden = true; navLayers(false); S.windK = 0.5; }
   function navExit() { navLayers(true); S.windK = 1; const r = S.wantRoute && S.args.route; if (r) fitRoute(r); renderAll(); }
+  window.__boranWalk = (r) => startWalk(r || (S.args && S.args.route));
+  window.__boranNav = () => NAV;
   function startWalk(r) {
     if (!NAV || !r) return;
     NAV.start(r);

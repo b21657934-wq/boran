@@ -92,11 +92,15 @@
     const hwAt = (s) => { const d = (s - pre) / scale; if (d < 0 || (plan && plan.length && d > plan.length + 0.5)) return null; for (let i = segs.length - 1; i >= 0; i--) if (segs[i][0] <= d + 0.01) return segs[i][1]; return null; };
     const P = base.pts, n = P.length, C = base.cum;
     const segAt = (s) => { const d = (s - pre) / scale; if (d < 0 || (plan && plan.length && d > plan.length + 0.5)) return null; for (let i = segs.length - 1; i >= 0; i--) if (segs[i][0] <= d + 0.01) return segs[i]; return null; };
-    const offAt = (s) => { const sg = segAt(s); return sg && WIDTH[sg[1]] ? halfOf(sg[1], sg[3]) + 2.0 : 0; };
+    const offAt = (s) => { const sg = segAt(s); if (!sg || !WIDTH[sg[1]]) return 0; const side = sg.length > 4 && sg[4] ? sg[4] : 1; return side * (halfOf(sg[1], sg[3]) + 2.0); };
+    const nearestIdx = (sb) => { let lo = 0, hi = n - 1; while (hi - lo > 1) { const md = (lo + hi) >> 1; if (C[md] <= sb) lo = md; else hi = md; } return Math.abs(C[lo] - sb) <= Math.abs(C[hi] - sb) ? lo : hi; };
+    const viaAt = new Map();
+    ((plan && plan.via) || []).forEach((v) => { const i = nearestIdx(pre + v.d * scale); if (i > 0 && i < n - 1) viaAt.set(i, v.pts.map((q) => F.xy(q))); });
     const ahead = (i) => { let j = i + 1; while (j < n - 1 && C[j] - C[i] < 2.5) j++; return j; };
     const K = [0];
     for (let i = 1; i < n - 1; i++) {
       const last = K[K.length - 1];
+      if (viaAt.has(i)) { K.push(i); continue; }
       if (C[i] - C[last] < 2.5 || C[n - 1] - C[i] < 2.5) continue;
       const j = ahead(i);
       const d0 = unit(P[i][0] - P[last][0], P[i][1] - P[last][1]), d1 = unit(P[j][0] - P[i][0], P[j][1] - P[i][1]);
@@ -126,7 +130,7 @@
       if (Math.abs(cr) > 0.1) {
         const u = ((pB[0] - pA[0]) * tB[1] - (pB[1] - pA[1]) * tB[0]) / cr;
         q = [pA[0] + tA[0] * u, pA[1] + tA[1] * u];
-        if (Math.hypot(q[0] - Pk[0], q[1] - Pk[1]) > 2.5 * Math.max(oA, oB) + 4) q = null;
+        if (Math.hypot(q[0] - Pk[0], q[1] - Pk[1]) > 2.5 * Math.max(Math.abs(oA), Math.abs(oB)) + 4) q = null;
       }
       if (!q) q = [(pA[0] + pB[0]) / 2, (pA[1] + pB[1]) / 2];
       out.push(q);
@@ -135,22 +139,29 @@
       const d = dirs[k - 1], v = [out[k][0] - out[k - 1][0], out[k][1] - out[k - 1][1]];
       if (v[0] * d[0] + v[1] * d[1] < 0) out[k] = out[k - 1].slice();
     }
+    const pts = [], KC = [], cuts = [];
+    for (let k = 0; k < m; k++) {
+      const vp = k > 0 && k < m - 1 ? viaAt.get(K[k]) : null;
+      if (vp) vp.forEach((q, j) => { if (j > 0) cuts.push(pts.length - 1); pts.push(q); KC.push(C[K[k]]); });
+      else { pts.push(out[k]); KC.push(C[K[k]]); }
+    }
+    const mm = pts.length;
     const wcum = [0];
-    for (let k = 1; k < m; k++) wcum.push(wcum[k - 1] + Math.hypot(out[k][0] - out[k - 1][0], out[k][1] - out[k - 1][1]));
-    const KC = K.map((i) => C[i]);
-    const path = new Path(out);
+    for (let k = 1; k < mm; k++) wcum.push(wcum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+    const gaps = cuts.map((k) => [wcum[k], wcum[k + 1]]);
+    const path = new Path(pts);
     const toWalk = (sb) => {
       if (sb <= 0) return 0;
-      if (sb >= base.len) return wcum[m - 1];
-      let lo = 0, hi = m - 1;
+      if (sb >= base.len) return wcum[mm - 1];
+      let lo = 0, hi = mm - 1;
       while (hi - lo > 1) { const md = (lo + hi) >> 1; if (KC[md] <= sb) lo = md; else hi = md; }
       const L = KC[lo + 1] - KC[lo], f = L > 0 ? (sb - KC[lo]) / L : 0;
       return wcum[lo] + (wcum[lo + 1] - wcum[lo]) * f;
     };
     const at = (d) => toWalk(pre + d * scale);
     const nameAt = (s) => { const d = (s - pre) / scale; for (let i = segs.length - 1; i >= 0; i--) if (segs[i][0] <= d + 0.01) { for (let j = i; j >= 0; j--) if (segs[j][2]) return segs[j][2]; return ''; } return ''; };
-    const fromWalk = (sw) => { let lo = 0, hi = m - 1; if (sw <= 0) return 0; if (sw >= wcum[m - 1]) return base.len; while (hi - lo > 1) { const md = (lo + hi) >> 1; if (wcum[md] <= sw) lo = md; else hi = md; } const L = wcum[lo + 1] - wcum[lo], f = L > 0 ? (sw - wcum[lo]) / L : 0; return KC[lo] + (KC[lo + 1] - KC[lo]) * f; };
-    return { base, path, scale, pre, toWalk, at, hwAt, nameAt, fromWalk };
+    const fromWalk = (sw) => { let lo = 0, hi = mm - 1; if (sw <= 0) return 0; if (sw >= wcum[mm - 1]) return base.len; while (hi - lo > 1) { const md = (lo + hi) >> 1; if (wcum[md] <= sw) lo = md; else hi = md; } const L = wcum[lo + 1] - wcum[lo], f = L > 0 ? (sw - wcum[lo]) / L : 0; return KC[lo] + (KC[lo + 1] - KC[lo]) * f; };
+    return { base, path, scale, pre, toWalk, at, hwAt, nameAt, fromWalk, gaps };
   }
 
   class Lane {
@@ -446,7 +457,7 @@
       const F = run.F, out = [];
       run.plan.phases.forEach((ph) => {
         if (ph.type !== 'walk') return;
-        const gaps = ph.crossings.map((X) => [X.sIn - 0.5, X.sOut + 0.5]).sort((x, y) => x[0] - y[0]);
+        const gaps = ph.crossings.map((X) => [X.sIn - 0.5, X.sOut + 0.5]).concat((ph.walk.gaps || []).map(([u, v]) => [u + 1.5, v - 1.5])).sort((x, y) => x[0] - y[0]);
         let a = 0;
         const piece = (u, v) => { if (v - u < 1) return; const pts = []; for (let s = u; s < v; s += 2) pts.push(F.ll(ph.walk.path.pos(s))); pts.push(F.ll(ph.walk.path.pos(v))); out.push({ type: 'Feature', properties: { k: 'side' }, geometry: { type: 'LineString', coordinates: pts } }); };
         gaps.forEach(([u, v]) => { piece(a, Math.max(a, u)); a = Math.max(a, v); });
@@ -1088,6 +1099,7 @@
 
     const api = {
       active: () => !!run,
+      debug: () => run,
       start(route) {
         if (run) api.stop(true);
         if (!route || !route.safe) return;

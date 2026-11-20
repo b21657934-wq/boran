@@ -248,7 +248,7 @@ def _bus_ride(city, an, A, B):
                         memo[(na, nb)] = None
                     else:
                         d = astar.describe(city, res, an["risks"], an["wind_k"])
-                        memo[(na, nb)] = (d["line"], d["length"], nav.leg(city, res)["segs"],
+                        memo[(na, nb)] = (d["line"], d["length"], nav.drive_segs(city, res),
                                           sum(city.edges[ei]["len"] for ei in res["edges"] if city.edges[ei]["hw"] == "service"))
                 if memo[(na, nb)] is None:
                     continue
@@ -274,7 +274,7 @@ def _bus_path(city, an, a, b):
         res = astar.search(city, a, b, an["risks"], an["wind_k"], safe=False, allow=allowed, weight=lambda ed: ROAD_W.get(ed["hw"], 3.0), allow_dir=flow)
         if res is not None:
             line = astar.describe(city, res, an["risks"], an["wind_k"])
-            return line["line"], line["length"], nav.leg(city, res)["segs"]
+            return line["line"], line["length"], nav.drive_segs(city, res)
     return None, None, []
 
 
