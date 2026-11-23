@@ -294,22 +294,47 @@
       };
       X.flow = [];
       X.width = 2 * c.half;
+      X.C = C;
+      X.sd = sd;
+      X.med = c.median || 0;
+      X.one = X.med > 0.6 ? (c.one || (c.half - X.med) / 2) : c.half;
+      X.B = { 1: Zr, '-1': Zr };
+      if (X.med > 0.6) {
+        const tgt = X.med + X.one;
+        for (const sg of [1, -1]) {
+          let hit = null, pv = null;
+          for (let s = Math.max(0, sIn - 3); s <= Math.min(walk.path.len, sOut + 3); s += 0.25) {
+            const v = sd(walk.path.pos(s)) - sg * tgt;
+            if (pv !== null && pv * v <= 0) { hit = walk.path.pos(s); break; }
+            pv = v;
+          }
+          if (!hit && c.parts) hit = c.parts.map((a) => F.xy(a)).find((q) => Math.sign(sd(q)) === sg) || null;
+          if (hit) { const a = (hit[0] - C[0]) * u[0] + (hit[1] - C[1]) * u[1]; X.B[sg] = [C[0] + u[0] * a, C[1] + u[1] * a]; }
+        }
+      }
+      X.side = (p) => { const v = sd(p); return Math.abs(v) < Math.max(1.5, X.med) ? 0 : Math.sign(v); };
+      X.zAt = (sg) => (sg ? X.B[sg] : Zr);
       return X;
     }
 
     function flatForCrossing(F, X) {
       const out = [], asphalt = night() ? '#1A212C' : '#5C6570', paint = night() ? '#C9D3E0' : '#F4F6F8', snow = night() ? '#2B3647' : '#F7F9FB';
-      const h = headingOf(X.u), med = X.c.median || 0;
-      out.push(flat(rect(F, X.Zr, h, 5.2, X.width + 0.4), asphalt, 1));
-      for (let w = -X.half + 0.6; w <= X.half - 0.5; w += 1.0) {
-        if (med > 0.6 && Math.abs(w) < med) continue;
-        const c = [X.Zr[0] + X.nL[0] * w, X.Zr[1] + X.nL[1] * w];
-        out.push(flat(rect(F, c, h, 3.6, 0.5), paint, 0.95));
+      const h = headingOf(X.u), med = X.med, div = med > 0.6;
+      const at = (B, a, w) => [B[0] + X.u[0] * a + X.nL[0] * w, B[1] + X.u[1] * a + X.nL[1] * w];
+      if (!div) out.push(flat(rect(F, X.Zr, h, 5.2, X.width + 0.4), asphalt, 1));
+      else {
+        for (const sg of [1, -1]) out.push(flat(rect(F, at(X.B[sg], 0, sg * (med + X.one)), h, 5.2, 2 * X.one + 0.4), asphalt, 1));
+        const ring = [at(X.B[-1], -2.6, -med - 0.2), at(X.B[-1], 2.6, -med - 0.2), at(X.B[1], 2.6, med + 0.2), at(X.B[1], -2.6, med + 0.2)];
+        ring.push(ring[0]);
+        out.push(flat([ring.map((q) => F.ll(q))], night() ? '#2A3446' : '#C7CED6', 1));
       }
-      for (const sgn of [1, -1]) {
-        const s = -sgn * 4.4, mid = sgn > 0 ? -(med + X.half) / 2 : (med + X.half) / 2;
-        const c = [X.Zr[0] + X.u[0] * s + X.nL[0] * mid, X.Zr[1] + X.u[1] * s + X.nL[1] * mid];
-        out.push(flat(rect(F, c, h, 0.4, X.half - med - 0.3), paint, 0.95));
+      for (let w = -X.half + 0.6; w <= X.half - 0.5; w += 1.0) {
+        if (div && Math.abs(w) < med) continue;
+        out.push(flat(rect(F, at(X.zAt(div ? Math.sign(w) : 0), 0, w), h, 3.6, 0.5), paint, 0.95));
+      }
+      for (const L of [1, -1]) {
+        const mid = L * (med + X.half) / 2;
+        out.push(flat(rect(F, at(X.zAt(div ? L : 0), L * 4.4, mid), h, 0.4, X.half - med - 0.3), paint, 0.95));
       }
       return out;
     }
@@ -319,12 +344,12 @@
       if (X.sig) {
         X.heads = [];
         for (const sgn of [1, -1]) {
-          const off = sgn * (X.half + 1.0), sAlong = -sgn * 3.2;
-          const base = [X.Zr[0] + X.u[0] * sAlong + X.nL[0] * off, X.Zr[1] + X.u[1] * sAlong + X.nL[1] * off];
+          const off = sgn * (X.half + 1.0), sAlong = -sgn * 3.2, Bp = X.zAt(X.med > 0.6 ? sgn : 0), Bc = X.zAt(X.med > 0.6 ? -sgn : 0);
+          const base = [Bp[0] + X.u[0] * sAlong + X.nL[0] * off, Bp[1] + X.u[1] * sAlong + X.nL[1] * off];
           out.push(ext(rect(F, base, h, 0.16, 0.16), 0, 3.4, pole));
           out.push(ext(rect(F, base, h, 0.36, 0.36, 0), 2.2, 2.95, '#1C2128'));
           X.heads.push({ kind: 'ped', at: [base[0] - X.nL[0] * sgn * 0.22, base[1] - X.nL[1] * sgn * 0.22] });
-          const carBase = [X.Zr[0] - X.u[0] * sgn * 6.5 + X.nL[0] * -sgn * (X.half + 1.2), X.Zr[1] - X.u[1] * sgn * 6.5 + X.nL[1] * -sgn * (X.half + 1.2)];
+          const carBase = [Bc[0] - X.u[0] * sgn * 6.5 + X.nL[0] * -sgn * (X.half + 1.2), Bc[1] - X.u[1] * sgn * 6.5 + X.nL[1] * -sgn * (X.half + 1.2)];
           out.push(ext(rect(F, carBase, h, 0.18, 0.18), 0, 4.6, pole));
           out.push(ext(rect(F, carBase, h, 0.42, 0.42), 3.4, 4.6, '#1C2128'));
           X.heads.push({ kind: 'car', at: [carBase[0] - X.u[0] * sgn * 0.25, carBase[1] - X.u[1] * sgn * 0.25] });
@@ -617,7 +642,8 @@
         T.lanes.forEach((ln) => {
           ln.stops = [];
           ph.crossings.forEach((X) => {
-            const [ss, d] = nearestOn(T.st.path, X.Zr);
+            const [s0] = nearestOn(T.st.path, X.Zr);
+            const [ss, d] = nearestOn(T.st.path, X.zAt(X.side(T.st.path.pos(s0))));
             const t = T.st.path.tangent(ss, 4), par = Math.abs(t[0] * X.u[0] + t[1] * X.u[1]);
             const sz = ln.dir > 0 ? ss : T.st.path.len - ss;
             if (par > 0.75 && d < X.half + 5) {
@@ -879,7 +905,7 @@
     function pedSpawn(s, d) {
       const rnd = run.rnd;
       run.peds.push({ s, d, v: WALK * BASE * (d > 0 ? 0.56 + rnd() * 0.16 : 0.72 + rnd() * 0.22), lat: (d > 0 ? -0.95 : 0.95) + (rnd() - 0.5) * 0.3,
-        coat: COATS[Math.floor(rnd() * COATS.length)], hat: rnd() < 0.6, ph: rnd() * 6.28, kerb: 0.5 + rnd() * 1.5, onX: null, hold: false });
+        coat: COATS[Math.floor(rnd() * COATS.length)], hat: rnd() < 0.6, ph: rnd() * 6.28, kerb: d > 0 ? 1.9 + rnd() * 1.4 : 0.5 + rnd() * 1.5, onX: null, hold: false });
     }
     function pedGo(X) {
       if (X.flow.some(({ lane, sz }) => lane.cars.some((c) => Math.abs(c.s - sz) < c.len / 2 + 2.6))) return false;
@@ -1020,7 +1046,8 @@
         const path = ph.walk.path;
         for (const q of run.peds) {
           const c = path.pos(q.s), t = path.tangent(q.s, 2), n = [-t[1], t[0]];
-          const p = [c[0] + n[0] * q.lat, c[1] + n[1] * q.lat];
+          const lat = Math.max(-1.4, Math.min(1.4, q.lat * (1 + 0.5 * Math.max(0, 1 - Math.abs(q.s - run.s) / 7))));
+          const p = [c[0] + n[0] * lat, c[1] + n[1] * lat];
           personFeats(F, p, q.coat, q.hat, out, q.hold ? Math.sin(run.wt * 2 + q.ph) * 0.012 : Math.abs(Math.sin(q.ph)) * 0.04);
           personShadow(F, p, shade);
         }

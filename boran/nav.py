@@ -296,11 +296,15 @@ def _merge_divided(cross):
             if gap < 40 and (diff < 25 or diff > 155) and p["median"] == 0.0:
                 lanes = max(p["lanes"], c["lanes"])
                 one = max(p["half"], c["half"])
-                median = max(0.6, gap / 2.0 - one)
+                r = math.radians(p["road"])
+                dx = (c["at"][0] - p["at"][0]) * 111320.0 * math.cos(math.radians(p["at"][1]))
+                dy = (c["at"][1] - p["at"][1]) * 110540.0
+                sep = abs(-dx * math.cos(r) + dy * math.sin(r))
+                median = max(0.6, sep / 2.0 - one)
                 out[-1] = dict(p, d=round((p["d"] + c["d"]) / 2.0, 1), median=round(median, 1), lanes=lanes,
-                               half=round(median + 2 * one, 1), sig=p["sig"] or c["sig"],
+                               half=round(median + 2 * one, 1), one=one, sig=p["sig"] or c["sig"],
                                at=[round((p["at"][0] + c["at"][0]) / 2, 6), round((p["at"][1] + c["at"][1]) / 2, 6)],
-                               name=p["name"] or c["name"])
+                               parts=[p["at"], c["at"]], name=p["name"] or c["name"])
                 continue
         out.append(c)
     return out

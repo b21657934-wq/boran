@@ -1,3 +1,4 @@
+import math
 import json
 import shutil
 import subprocess
@@ -115,3 +116,16 @@ def test_walk_to_a_stop_ends_on_the_stop_kerb():
     other = nav.leg(city, {"nodes": [2, 1], "edges": [0]}, a_end=135.0)
     assert same["segs"][0][4] == 1 and not same["via"]
     assert other["via"] and other["via"][-1]["d"] == other["length"] and len(other["via"][-1]["pts"]) == 3
+
+
+def test_merge_divided_uses_lateral_gap_and_keeps_both_zebras():
+    lat = 51.0
+    k = 111320.0 * math.cos(math.radians(lat))
+    a = {"d": 100.0, "road": 0.0, "half": 5.25, "lanes": 2, "sig": False, "at": [71.0, lat], "name": "X"}
+    b = {"d": 130.0, "road": 180.0, "half": 5.25, "lanes": 2, "sig": True, "at": [71.0 + 18.0 / k, lat + 12.0 / 110540.0], "name": ""}
+    out = nav._merge_divided([a, b])
+    assert len(out) == 1
+    m = out[0]
+    assert abs(m["median"] - (9.0 - 5.25)) < 0.15
+    assert abs(m["half"] - (m["median"] + 2 * 5.25)) < 0.15
+    assert m["parts"] == [a["at"], b["at"]] and m["one"] == 5.25 and m["sig"]
