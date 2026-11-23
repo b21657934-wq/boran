@@ -788,7 +788,7 @@
     const a = S.args, wx = a.weather, now = wx.now;
     document.documentElement.lang = S.lang === 'kk' ? 'kk' : S.lang;
     $('t-brain').textContent = t('brain'); $('t-scn').textContent = t('scn'); $('t-ice').textContent = t('r_btn'); $('t-night').textContent = t('nt_btn'); $('t-hall').textContent = t('hl_btn'); $('t-from').textContent = t('from'); $('t-to').textContent = t('to');
-    $('t-build').textContent = t('build'); $('t-walk').textContent = t('walk_btn'); $('t-legend').textContent = t('legend'); $('t-leg-lo').textContent = t('lo'); $('t-leg-hi').textContent = t('hi');
+    $('t-build').textContent = t('build'); $('t-walk').textContent = t('walk_btn'); $('t-tour').textContent = t('tour_btn'); $('t-legend').textContent = t('legend'); $('t-leg-lo').textContent = t('lo'); $('t-leg-hi').textContent = t('hi');
     $('t-brain-title').textContent = t('brain'); $('t-marks-title').textContent = t('m_title'); $('btn-lang').textContent = t('code');
     $('btn-brain').setAttribute('aria-label', t('brain')); $('btn-scn').setAttribute('aria-label', t('scn')); $('btn-ice').setAttribute('aria-label', t('m_title'));
     $('wx-t').textContent = num(Math.round(now.temp));
@@ -930,8 +930,194 @@
       html += step(3, t('s3'), t('s3a'), io([['in', t('s3in', { n: st.nodes.toLocaleString('ru-RU'), e: st.edges.toLocaleString('ru-RU') })]]) + '<p class="empty">' + t('s3empty') + '</p>');
       html += step(4, t('s4'), t('s4a'), '<p class="empty">' + t('s3empty') + '</p>');
     }
-    body.innerHTML = html + '<p class="assume">' + t('assume') + '</p>';
+    body.innerHTML = (r ? '<button class="cta tourbtn" id="brain-tour" style="margin:0 0 12px">' + t('tour_brain') + '</button>' : '') + html + '<p class="assume">' + t('assume') + '</p>';
     const bc = $('brain-cmp'); if (bc) bc.onclick = () => openAlgos();
+    const bt = $('brain-tour'); if (bt) bt.onclick = () => tourStart();
+  }
+
+  const TOUR = { on: false, i: 0, auto: true, timers: [], t0: 0, el: 0, adv: 0, raf: 0 };
+  const TOUR_DUR = [10000, 11500, 12500, 10000];
+  const tourRoute = () => S.wantRoute && S.args && S.args.route;
+  const tourAt = (ms, fn) => { TOUR.timers.push(setTimeout(() => { if (TOUR.on) fn(); }, ms)); };
+  function tourClear() { TOUR.timers.forEach(clearTimeout); TOUR.timers = []; clearTimeout(TOUR.adv); }
+  function countTo(e, from, to, ms, fmt) {
+    if (!e) return;
+    const t0 = performance.now();
+    const step = (now) => { const k = Math.min(1, (now - t0) / ms), q = 1 - Math.pow(1 - k, 3); e.textContent = fmt(from + (to - from) * q); if (k < 1 && TOUR.on) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  }
+  function routePts(r) {
+    const lines = r.transit ? r.transit.legs.concat([r.transit.ride]) : [r.safe.line];
+    return [].concat(...lines);
+  }
+  function tourPad() {
+    const card = $('tr-card').getBoundingClientRect(), H = innerHeight;
+    if (innerWidth > 900) return { top: 70, bottom: 50, left: 60, right: Math.round(card.width + 56) };
+    return { top: 84, bottom: Math.max(60, Math.min(H * 0.64, H - card.top + 20)), left: 24, right: 24 };
+  }
+  function tourCam(pts, o = {}) {
+    if (!pts.length || !map) return;
+    let x0 = 180, x1 = -180, y0 = 90, y1 = -90;
+    pts.forEach((p) => { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); });
+    const bearing = o.bearing != null ? o.bearing : map.getBearing();
+    const cam = map.cameraForBounds([[x0, y0], [x1, y1]], { padding: tourPad(), maxZoom: o.maxZoom || 16.2, bearing });
+    if (cam) { map.stop(); map.flyTo({ center: cam.center, zoom: cam.zoom + (o.dz || 0), bearing, pitch: o.pitch != null ? o.pitch : 45, duration: o.duration || 2200, essential: true }); }
+  }
+  function armAdv(ms) { clearTimeout(TOUR.adv); if (TOUR.auto && TOUR.i < 4) TOUR.adv = setTimeout(() => { if (TOUR.on) tourStep(TOUR.i + 1); }, ms); }
+  function renderTourBar() {
+    const names = [t('tour_k1'), t('tour_k2'), t('tour_k3'), t('tour_k4')];
+    $('tr-steps').innerHTML = names.map((n, j) => '<button class="' + (j < TOUR.i ? 'done' : j === TOUR.i ? 'on' : '') + '" data-j="' + j + '"><i><b></b></i>' + n + '</button>').join('');
+    $('tr-steps').querySelectorAll('button').forEach((b) => { b.onclick = () => tourStep(+b.dataset.j); });
+  }
+  function tourBarLoop() {
+    cancelAnimationFrame(TOUR.raf);
+    const loop = () => {
+      if (!TOUR.on) return;
+      const b = $('tr-steps').querySelector('button.on i b');
+      if (b && TOUR.i < 4) b.style.width = Math.min(100, ((TOUR.auto ? performance.now() - TOUR.t0 : TOUR.el) / TOUR_DUR[TOUR.i]) * 100).toFixed(1) + '%';
+      TOUR.raf = requestAnimationFrame(loop);
+    };
+    TOUR.raf = requestAnimationFrame(loop);
+  }
+  const tourNav = () => '<div class="tr-nav"><button class="btn2 tr-prev"' + (TOUR.i === 0 ? ' disabled' : '') + '>← ' + t('tour_prev') + '</button><button class="btn2 tr-auto" aria-pressed="' + TOUR.auto + '">' + (TOUR.auto ? t('tour_pause') : t('tour_play')) + '</button><button class="btn2 tr-next">' + t('tour_next') + ' →</button></div>';
+  const tourCard = (k, h2, viz, say) => '<div class="tr-k">' + k + '</div><h2>' + h2 + '</h2><div class="tr-viz">' + viz + '</div><p class="tr-say">' + say + '</p>' + tourNav();
+  function tourToggle() {
+    if (TOUR.i >= 4) return;
+    if (TOUR.auto) { TOUR.auto = false; TOUR.el = performance.now() - TOUR.t0; clearTimeout(TOUR.adv); }
+    else { TOUR.auto = true; TOUR.t0 = performance.now() - TOUR.el; armAdv(Math.max(800, TOUR_DUR[TOUR.i] - TOUR.el)); }
+    const b = $('tr-card').querySelector('.tr-auto');
+    if (b) { b.setAttribute('aria-pressed', TOUR.auto); b.textContent = TOUR.auto ? t('tour_pause') : t('tour_play'); }
+  }
+  function wireTour(card) {
+    const q = (c) => card.querySelector(c);
+    if (q('.tr-prev')) q('.tr-prev').onclick = () => tourStep(Math.max(0, TOUR.i - 1));
+    if (q('.tr-next')) q('.tr-next').onclick = () => tourStep(TOUR.i + 1);
+    if (q('.tr-auto')) q('.tr-auto').onclick = tourToggle;
+  }
+
+  function tourHMM(card, r) {
+    const h = S.args.hmm;
+    const order = h.now.map((p, j) => [p, j]).sort((a, b) => b[0] - a[0]).slice(0, 3);
+    const top = order.map(([p, j]) => '<b>' + t('st_' + h.states[j]) + ' ' + Math.round(p * 100) + '%</b>').join(', ');
+    const n = h.beliefs.length, last = 0.3 + n * 0.17;
+    const chips = '<div class="tr-chips">' + order.map(([p, j], m) => '<span style="animation-delay:' + (last + 0.2 + m * 0.2).toFixed(2) + 's"><i style="background:' + STATE_COL[h.states[j]] + '"></i>' + t('st_' + h.states[j]) + ' ' + Math.round(p * 100) + '%</span>').join('') + '</div>';
+    card.innerHTML = tourCard('HMM · forward + Viterbi', t('tour_h1'), hmmViz(h) + chips, t('tour_say1', { n: h.obs.length, top }));
+    card.querySelectorAll('.viz rect').forEach((rc) => { const col = Math.floor((+rc.getAttribute('x')) / (340 / n)); rc.style.animationDelay = (0.3 + col * 0.17).toFixed(2) + 's'; });
+    wireTour(card);
+    tourCam(routePts(r), { pitch: 38, dz: -0.4, bearing: map.getBearing() + 24, duration: 2800 });
+  }
+
+  function tourBayes(card, r) {
+    const b = r.bayes;
+    if (!b) { card.innerHTML = tourCard(t('s2a'), t('tour_h2'), '', t('s2empty')); wireTour(card); return; }
+    const facts = b.steps.map((x) => '<li class="' + (x.present ? '' : 'no') + '"><span class="tick ' + (x.present ? 'y' : '') + '">' + (x.present ? '✓' : '–') + '</span><span>' + t('f_' + x.feature) + '</span><span class="p">' + num(x.after, 2) + '</span></li>').join('');
+    const viz = '<div class="tr-p"><b id="tr-pv">' + num(b.prior, 2) + '</b><small>' + t('tour_p') + '</small></div><div class="tr-pbar"><i id="tr-pb"></i></div><ol class="tr-facts">' + facts + '</ol>';
+    card.innerHTML = tourCard(t('s2a'), t('tour_h2'), viz, t('tour_say2', { p: num(b.prior, 2), q: num(b.posterior, 2) }));
+    wireTour(card);
+    const pv = $('tr-pv'), pb = $('tr-pb'), lis = card.querySelectorAll('.tr-facts li');
+    requestAnimationFrame(() => { pb.style.width = (b.prior * 100).toFixed(1) + '%'; });
+    let prev = b.prior;
+    b.steps.forEach((x, j) => tourAt(1700 + j * 1350, () => {
+      lis[j].classList.add('in');
+      countTo(pv, prev, x.after, 750, (v) => num(v, 2)); prev = x.after;
+      pb.style.width = (x.after * 100).toFixed(1) + '%';
+    }));
+    if (b.at) { const p = tourPad(); map.stop(); map.flyTo({ center: b.at, zoom: 16.7, pitch: 60, bearing: map.getBearing() - 40, duration: 2800, essential: true, offset: [(p.left - p.right) / 2, (p.top - p.bottom) / 2] }); }
+  }
+
+  function tourSearch(card, r) {
+    const st = S.city.stats || { nodes: 0 };
+    const row = (a, nm, id) => '<div class="tr-row" style="--c:' + ALGO_COL[a] + '"><b>' + nm + '</b><div class="tr-meter"><i id="tr-m' + id + '"></i></div><span><em id="tr-n' + id + '">0</em> ' + t('tour_exp') + '<span id="tr-r' + id + '"></span></span></div>';
+    const viz = '<div class="tr-race">' + row('bfs', 'BFS', 'b') + row('astar', 'A*', 'a') + '</div><div class="tr-f"><code>f(n) = g(n) + h(n)</code><br>' + t('s3calc', { a: S.args.params.alpha, b: num(S.args.params.beta * S.args.wind_k, 2) }) + '</div>';
+    card.innerHTML = tourCard('BFS · A*', t('tour_h3', { n: st.nodes.toLocaleString('ru-RU') }), viz, t('tour_wait'));
+    wireTour(card);
+    const same = () => S.cmp && S.src && S.cmp.src[0].toFixed(4) === S.src.lon.toFixed(4) && S.cmp.dst[0].toFixed(4) === S.dst.lon.toFixed(4);
+    const meter = (id, w, ms) => { const m = $('tr-m' + id); if (m) { m.style.transition = 'width ' + ms + 'ms linear'; m.style.width = w + '%'; } };
+    const go = () => {
+      if (!same()) return false;
+      const B = S.cmp.results.find((x) => x.algo === 'bfs' && x.found), A = S.cmp.results.find((x) => x.algo === 'astar' && x.found);
+      if (!B || !A) return false;
+      const fewer = B.expanded / Math.max(1, A.expanded) >= 1.3 ? t('tour_fewer', { a: A.expanded.toLocaleString('ru-RU'), b: B.expanded.toLocaleString('ru-RU') }) : '';
+      card.querySelector('.tr-say').innerHTML = t('tour_say3', { rb: num(B.fall * 100, 1), ra: num(A.fall * 100, 1), k: fewer });
+      TOUR.t0 = performance.now(); TOUR.el = 0; armAdv(TOUR_DUR[2]);
+      tourCam(B.wave.concat(A.line, [S.cmp.src, S.cmp.dst]), { pitch: 34, bearing: -12, duration: 1700 });
+      tourAt(1500, () => {
+        S.cmpOpen = true; S.cmpSel = 'bfs'; pushCompare();
+        meter('b', 100, 1600); countTo($('tr-nb'), 0, B.expanded, 1600, (v) => Math.round(v).toLocaleString('ru-RU'));
+        tourAt(1700, () => { $('tr-rb').textContent = ' · ' + t('tour_risk') + ' ' + num(B.fall * 100, 1) + '%'; });
+      });
+      tourAt(4600, () => {
+        S.cmpSel = 'astar'; pushCompare();
+        meter('a', Math.max(0.8, (A.expanded / B.expanded) * 100).toFixed(2), 1600); countTo($('tr-na'), 0, A.expanded, 1600, (v) => Math.round(v).toLocaleString('ru-RU'));
+        tourAt(1700, () => { $('tr-ra').textContent = ' · ' + t('tour_risk') + ' ' + num(A.fall * 100, 1) + '%'; });
+      });
+      tourAt(8200, () => { S.cmpOpen = false; pushCompare(); S.waveT0 = performance.now() - 9000; S.routeT0 = performance.now(); S.drawK = null; tourCam(routePts(r), { pitch: 45, duration: 1800 }); });
+      return true;
+    };
+    if (!go()) {
+      clearTimeout(TOUR.adv);
+      S.wantCompare = true;
+      if (!same()) { S.cmp = null; S.cmpPending = true; send(); }
+      const poll = (n) => { if (TOUR.i !== 2) return; if (!go() && n < 60) tourAt(350, () => poll(n + 1)); };
+      tourAt(350, () => poll(0));
+      tourCam(routePts(r), { pitch: 34, bearing: -12, duration: 1800 });
+    }
+  }
+
+  function tourMDP(card, r) {
+    const m = r.mdp, q = m.table[m.level];
+    const vals = ['go', 'wait', 'transit'].filter((a) => q[a] != null).map((a) => [a, -q[a]]);
+    const mx = Math.max(...vals.map((v) => v[1]));
+    const rows = vals.map(([a, v], j) => '<div class="tr-act' + (m.policy[m.level] === a ? ' best' : '') + '" style="animation-delay:' + (0.4 + j * 0.3).toFixed(2) + 's"><span>' + t('ac_' + a) + '</span><div class="tr-meter"><i data-w="' + ((v / mx) * 100).toFixed(1) + '"></i></div><em>' + num(v, 0) + ' ' + t('min') + '</em></div>').join('');
+    card.innerHTML = tourCard('MDP · value iteration', t('tour_h4'), '<div class="tr-acts">' + rows + '</div><div class="tr-dec"><small>' + t('tour_dec') + '</small><b>' + t('a_' + m.best) + '</b></div>', t('tour_say4', { l: t('l_' + m.level) }));
+    wireTour(card);
+    tourAt(900, () => card.querySelectorAll('.tr-act .tr-meter i').forEach((i) => { i.style.width = i.dataset.w + '%'; }));
+    tourAt(2600, () => card.querySelector('.tr-dec').classList.add('in'));
+    tourCam(routePts(r), { pitch: 48, bearing: -12, duration: 2200 });
+  }
+
+  function tourEnd(card, r) {
+    card.innerHTML = '<div class="tr-k">HMM → ' + t('tour_k2') + ' → A* → MDP</div><h2>' + t('tour_end') + '</h2><div class="tr-chain"><span>HMM</span><i>→</i><span>' + t('tour_k2') + '</span><i>→</i><span>A*</span><i>→</i><span>MDP</span></div><p class="tr-say">' + t('tour_end_say') + '</p>'
+      + '<div class="tr-end"><button class="cta walk tr-walk"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg>' + t('walk_btn') + '</button><button class="btn2 tr-again">' + t('tour_again') + '</button><button class="btn2 tr-done">' + t('tour_close') + '</button></div>';
+    card.querySelector('.tr-walk').onclick = () => { tourExit(true); startWalk(r); };
+    card.querySelector('.tr-again').onclick = () => { TOUR.auto = true; tourStep(0); };
+    card.querySelector('.tr-done').onclick = () => tourExit();
+    tourCam(routePts(r), { pitch: 45, bearing: -12, duration: 2000 });
+  }
+
+  function tourStep(i) {
+    if (!TOUR.on) return;
+    tourClear();
+    const r = tourRoute();
+    if (!r) { tourExit(); return; }
+    if (S.cmpOpen) { S.cmpOpen = false; pushCompare(); }
+    TOUR.i = Math.min(4, i); TOUR.t0 = performance.now(); TOUR.el = 0;
+    renderTourBar();
+    const card = $('tr-card');
+    card.style.animation = 'none'; void card.offsetWidth; card.style.animation = '';
+    card.scrollTop = 0;
+    if (TOUR.i >= 4) { tourEnd(card, r); return; }
+    [tourHMM, tourBayes, tourSearch, tourMDP][TOUR.i](card, r);
+    if (TOUR.i !== 2) armAdv(TOUR_DUR[TOUR.i]);
+    tourBarLoop();
+  }
+  function tourStart() {
+    const r = tourRoute();
+    if (!r) { toast(t('need')); return; }
+    if ((NAV && NAV.active()) || (HALL && HALL.active()) || (NIGHT && NIGHT.active())) return;
+    $('brain').hidden = true; $('marks').hidden = true; if (S.cmpOpen) closeAlgos();
+    TOUR.on = true; TOUR.auto = true;
+    if (map) map.setPadding({ top: 0, right: 0, bottom: 0, left: 0 });
+    document.body.classList.add('tour'); $('tour').hidden = false;
+    tourStep(0);
+  }
+  function tourExit(quiet) {
+    if (!TOUR.on) return;
+    TOUR.on = false; tourClear(); cancelAnimationFrame(TOUR.raf);
+    S.cmpOpen = false; pushCompare();
+    document.body.classList.remove('tour'); $('tour').hidden = true;
+    const r = tourRoute();
+    if (r && !quiet) { S.drawK = null; fitRoute(r); }
   }
 
   async function predictAt(lon, lat) {
@@ -1396,6 +1582,14 @@
     S.retry2 = setTimeout(() => { if (S.pendingRoute) { S.pendingRoute = false; $('btn-go').classList.remove('busy'); toast(t('noanswer')); if (S.brief) closeBrief(false); } }, 26000);
   };
   $('btn-walk').onclick = () => { const r = S.wantRoute && S.args.route; if (r) startWalk(r); };
+  $('btn-tour').onclick = () => tourStart();
+  $('tr-x').onclick = () => tourExit();
+  document.addEventListener('keydown', (e) => {
+    if (!TOUR.on) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); tourStep(TOUR.i + 1); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); tourStep(Math.max(0, TOUR.i - 1)); }
+    else if (e.key === ' ') { e.preventDefault(); tourToggle(); }
+  });
   $('btn-why').onclick = () => { $('marks').hidden = true; closeAlgos(); $('brain').hidden = false; renderBrain(); };
   $('btn-cmp').onclick = () => openAlgos();
   $('algos-x').onclick = () => closeAlgos();
@@ -1435,6 +1629,6 @@
   };
   $('panel-handle').onclick = () => $('panel').classList.toggle('min');
   $('wx').onclick = () => $('wx').classList.toggle('open');
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (NIGHT) NIGHT.close(); if (HALL) HALL.close(); $('brain').hidden = true; closeAlgos(); $('marks').hidden = true; $('scn-menu').hidden = true; $('place-list').hidden = true; S.picking = null; if (S.args) renderAll(); } });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && TOUR.on) { tourExit(); return; } if (e.key === 'Escape') { if (NIGHT) NIGHT.close(); if (HALL) HALL.close(); $('brain').hidden = true; closeAlgos(); $('marks').hidden = true; $('scn-menu').hidden = true; $('place-list').hidden = true; S.picking = null; if (S.args) renderAll(); } });
   window.__boran = S;
 })();
