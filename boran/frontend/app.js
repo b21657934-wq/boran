@@ -1032,9 +1032,20 @@
     if (cam) map.flyTo({ center: cam.center, zoom: Math.min(16.4, cam.zoom), bearing: -12, pitch: 45, duration: 2400, essential: true });
   }
 
-  function startSplash() {
+  let SPLASH_HTML = null;
+  function replaySplash() {
+    if (!SPLASH_HTML || $('splash') || !S.splashDone || (NAV && NAV.active()) || (HALL && HALL.active()) || (NIGHT && NIGHT.active())) return;
+    document.body.insertAdjacentHTML('beforeend', SPLASH_HTML);
+    if ($('sp-tag')) $('sp-tag').textContent = t('sp_tag');
+    document.body.classList.add('intro');
+    S.splashDone = false;
+    startSplash(true);
+  }
+  function startSplash(again) {
     const sp = $('splash'), body = document.body, brand = $('brand');
-    const quick = /[?&]quick/.test(location.search) || navigator.webdriver;
+    if (sp && !SPLASH_HTML) SPLASH_HTML = sp.outerHTML;
+    if (brand && !brand.dataset.on) { brand.dataset.on = '1'; brand.addEventListener('click', replaySplash); }
+    const quick = !again && (/[?&]quick/.test(location.search) || navigator.webdriver);
     const calm = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
     const free = () => !(S.wantRoute && S.args.route) && !(HALL && HALL.active()) && !(NIGHT && NIGHT.active());
     const finish = () => { if (sp && sp.parentNode) sp.remove(); body.classList.remove('intro', 'reveal'); if (brand) brand.classList.remove('wait'); };

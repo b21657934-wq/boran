@@ -562,7 +562,7 @@ body.nightshow #top{justify-content:flex-end}
 #splash.go .sp-tag{animation:sp-out .3s var(--ease) forwards}
 @keyframes sp-out{from{opacity:1}to{opacity:0;transform:translateY(-6px)}}
 #splash.fast .sp-dark{opacity:0}
-.wx-brand{font-family:var(--display);font-weight:700;font-size:15px;letter-spacing:.03em;line-height:1.02;margin:0 0 9px;color:var(--t1);width:max-content}
+.wx-brand{cursor:pointer;font-family:var(--display);font-weight:700;font-size:15px;letter-spacing:.03em;line-height:1.02;margin:0 0 9px;color:var(--t1);width:max-content}
 .wx-brand.wait{opacity:0}
 body.intro #top,body.intro #panel,body.intro #legend,body.intro .fab,body.intro #badge{opacity:0;pointer-events:none}
 body.intro #top{translate:0 -16px}body.intro #panel{translate:0 22px}body.intro #legend,body.intro .fab{translate:0 12px}
