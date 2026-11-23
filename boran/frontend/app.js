@@ -80,7 +80,7 @@
     if (args.reportsInline) applyReports(args.reportsInline);
     else if (args.reportsV !== S.repsV) fetchReports();
     if (first) {
-      if (args.hall === 'phone' && HALL) { const sp = $('splash'); if (sp) sp.remove(); S.splashDone = true; HALL.openPhone(); } else startSplash();
+      if (args.hall === 'phone' && HALL) { const sp = $('splash'); if (sp) sp.remove(); document.body.classList.remove('intro'); S.splashDone = true; HALL.openPhone(); } else startSplash();
       setInterval(() => { if (document.visibilityState === 'visible' && Date.now() - (S.repPollAt || 0) > (S.repEvery || 8000)) fetchReports(); }, 1000);
     }
   }
@@ -1033,17 +1033,61 @@
   }
 
   function startSplash() {
-    const sp = $('splash');
-    const done = () => {
-      if (S.splashDone) return; S.splashDone = true;
-      sp.classList.add('out'); setTimeout(() => sp.remove(), 950);
-      const c = S.args.places.find((p) => p.id === 'campus');
-      map.easeTo({ bearing: 28, duration: 2600, easing: (x) => x });
-      setTimeout(() => { if (!(S.wantRoute && S.args.route) && !(HALL && HALL.active()) && !(NIGHT && NIGHT.active())) map.flyTo({ center: [c.lon, c.lat], zoom: 15.3, pitch: 60, bearing: 18, duration: 5200, essential: true }); }, 2650);
-    };
+    const sp = $('splash'), body = document.body, brand = $('brand');
     const quick = /[?&]quick/.test(location.search) || navigator.webdriver;
-    sp.addEventListener('pointerdown', done);
-    setTimeout(done, quick ? 50 : 3600);
+    const calm = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const free = () => !(S.wantRoute && S.args.route) && !(HALL && HALL.active()) && !(NIGHT && NIGHT.active());
+    const finish = () => { if (sp && sp.parentNode) sp.remove(); body.classList.remove('intro', 'reveal'); if (brand) brand.classList.remove('wait'); };
+    if (!sp || quick) { S.splashDone = true; finish(); return; }
+    if (brand) brand.classList.add('wait');
+    const title = sp.querySelector('.sp-title'), TS = window.__introScale || 1;
+    const later = (fn, ms) => setTimeout(fn, ms * TS);
+    const t0 = performance.now();
+    let waveT = null, ended = false;
+    const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+    const reach = () => Math.hypot(innerWidth, innerHeight) * 0.55 + 260;
+    if (free() && !calm) map.jumpTo({ center: VIEW0.center, zoom: 14.2, pitch: 46, bearing: -64 });
+    const tick = () => {
+      if (waveT === null) return;
+      const k = Math.max(0, Math.min(1, (performance.now() - waveT) / (1900 * TS)));
+      sp.style.setProperty('--r', (ease(k) * reach()).toFixed(1) + 'px');
+      sp.style.setProperty('--k', Math.max(0, (k - 0.7) / 0.3).toFixed(3));
+      if (k < 1) requestAnimationFrame(tick);
+    };
+    const handoff = () => {
+      if (!free()) return;
+      const c = S.args.places.find((p) => p.id === 'campus');
+      if (c) map.flyTo({ center: [c.lon, c.lat], zoom: 15.3, pitch: 60, bearing: 18, duration: 5200, essential: true });
+    };
+    const reveal = (fast) => {
+      if (ended) return; ended = true; S.splashDone = true;
+      sp.classList.add('go'); if (fast) sp.classList.add('fast');
+      const dur = (fast ? 0.55 : 0.9) * TS;
+      body.classList.add('reveal');
+      if (title && brand) {
+        const a = title.getBoundingClientRect(), b = brand.getBoundingClientRect();
+        const lift = body.classList.contains('intro') ? 16 : 0;
+        const dx = b.left + b.width / 2 - (a.left + a.width / 2), dy = b.top + lift + b.height / 2 - (a.top + a.height / 2);
+        title.style.transition = `transform ${dur}s cubic-bezier(.65,0,.2,1)`;
+        title.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${(b.height / a.height).toFixed(4)})`;
+      }
+      later(() => body.classList.remove('intro'), fast ? 40 : 120);
+      setTimeout(() => { if (brand) brand.classList.remove('wait'); if (title) title.style.opacity = '0'; }, dur * 1000);
+      setTimeout(() => { finish(); }, dur * 1000 + 700 * TS);
+      later(handoff, fast ? 400 : 1500);
+    };
+    const wave = () => {
+      if (waveT !== null || ended) return;
+      waveT = performance.now();
+      if (calm) { sp.classList.add('fast'); later(() => reveal(true), 300); return; }
+      requestAnimationFrame(tick);
+      if (free()) map.easeTo({ zoom: VIEW0.zoom, pitch: VIEW0.pitch, bearing: VIEW0.bearing, duration: 3300 * TS, easing: (x) => 1 - Math.pow(1 - x, 3), essential: true });
+      later(() => reveal(false), 1350);
+    };
+    const ready = () => setTimeout(wave, Math.max(0, 950 * TS - (performance.now() - t0)));
+    if (map.loaded() && map.areTilesLoaded && map.areTilesLoaded()) ready();
+    else { map.once('idle', ready); later(wave, 2600); }
+    sp.addEventListener('pointerdown', () => { if (waveT === null) waveT = performance.now(); reveal(true); });
   }
 
   const ALGO_COL = { bfs: '#7C4DFF', dfs: '#FF6D00', ucs: '#00A389', greedy: '#E6A700', astar: '#1E88E5' };

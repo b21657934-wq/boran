@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="vendor/maplibre-gl.css">
 <link rel="stylesheet" href="styles.css">
 </head>
-<body class="night">
+<body class="night intro">
 <div id="map"></div>
 <div id="map2" hidden></div>
 <div id="split" hidden><div class="split-bar"></div><div class="split-knob">⟷</div><b class="split-l"></b><b class="split-r"></b><div class="split-c split-cl"></div><div class="split-c split-cr"></div></div>
@@ -16,6 +16,7 @@
 
 <header id="top">
   <section id="wx" class="glass" aria-live="polite">
+    <div class="wx-brand" id="brand">БОРАН</div>
     <div class="wx-main">
       <div class="wx-temp"><span id="wx-t">—</span><sup>°</sup></div>
       <div class="wx-side">
@@ -94,21 +95,12 @@
 <div id="mark-pop" class="glass" hidden></div>
 <div id="toast" class="glass" hidden></div>
 
-<div id="splash">
-  <div class="sp-streaks"></div>
-  <div class="sp-frost"></div>
+<div id="splash" aria-hidden="true">
+  <div class="sp-dark"></div>
+  <div class="sp-wave"></div>
   <div class="sp-center">
-    <h1 class="sp-title" aria-label="БОРАН"><span>Б</span><span>О</span><span>Р</span><span>А</span><span>Н</span></h1>
-    <svg class="sp-orn" viewBox="0 0 300 44" aria-hidden="true">
-      <path pathLength="1" d="M150 30 C150 22 146 14 138 10 C128 5 116 8 112 17 C108 26 116 33 124 30 C130 28 130 20 124 19"/>
-      <path pathLength="1" d="M150 30 C150 22 154 14 162 10 C172 5 184 8 188 17 C192 26 184 33 176 30 C170 28 170 20 176 19"/>
-      <path pathLength="1" d="M104 26 L22 26 M196 26 L278 26"/>
-      <path class="d" d="M150 33 L154 37 L150 41 L146 37 Z"/>
-      <path class="d" d="M18 22 L22 26 L18 30 L14 26 Z"/>
-      <path class="d" d="M282 22 L286 26 L282 30 L278 26 Z"/>
-    </svg>
+    <h1 class="sp-title" aria-label="БОРАН"><span><i>Б</i></span><span><i>О</i></span><span><i>Р</i></span><span><i>А</i></span><span><i>Н</i></span></h1>
     <p class="sp-tag" id="sp-tag">Искусственный интеллект видит лёд под снегом</p>
-    <p class="sp-sub" id="sp-sub">Астана</p>
   </div>
 </div>
 
