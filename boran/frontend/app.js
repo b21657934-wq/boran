@@ -1063,6 +1063,7 @@
       const k = Math.max(0, Math.min(1, (performance.now() - waveT) / (1900 * TS)));
       sp.style.setProperty('--r', (ease(k) * reach()).toFixed(1) + 'px');
       sp.style.setProperty('--k', Math.max(0, (k - 0.7) / 0.3).toFixed(3));
+      if (ease(k) * reach() > Math.min(innerWidth * 0.5, 420)) sp.classList.add('lit');
       if (k < 1) requestAnimationFrame(tick);
     };
     const handoff = () => {
@@ -1073,7 +1074,7 @@
     const reveal = (fast) => {
       if (ended) return; ended = true; S.splashDone = true;
       sp.classList.add('go'); if (fast) sp.classList.add('fast');
-      const dur = (fast ? 0.55 : 0.9) * TS;
+      const dur = (fast ? 0.55 : 0.95) * TS;
       body.classList.add('reveal');
       if (title && brand) {
         const a = title.getBoundingClientRect(), b = brand.getBoundingClientRect();
@@ -1082,10 +1083,11 @@
         title.style.transition = `transform ${dur}s cubic-bezier(.65,0,.2,1)`;
         title.style.transform = `translate(${dx.toFixed(1)}px, ${dy.toFixed(1)}px) scale(${(b.height / a.height).toFixed(4)})`;
       }
-      later(() => body.classList.remove('intro'), fast ? 40 : 120);
+      body.classList.remove('intro');
       setTimeout(() => { if (brand) brand.classList.remove('wait'); if (title) title.style.opacity = '0'; }, dur * 1000);
       setTimeout(() => { finish(); }, dur * 1000 + 700 * TS);
       later(handoff, fast ? 400 : 1500);
+      later(() => sp.classList.add('fade'), fast ? 0 : 600);
     };
     const wave = () => {
       if (waveT !== null || ended) return;
