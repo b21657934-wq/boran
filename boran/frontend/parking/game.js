@@ -5,6 +5,7 @@ import { UnrealBloomPass } from './UnrealBloomPass.js';
 import { OutputPass } from './OutputPass.js';
 import { RoomEnvironment } from './RoomEnvironment.js';
 import { mergeGeometries } from './BufferGeometryUtils.js';
+import { buildGraph, search, nearestLane, ALGOS } from './ai.js';
 
 const FALLBACK = {
   pg_obj_gate: 'Drive up to the barrier', pg_obj_gate_s: 'Your plate is read automatically',
@@ -51,7 +52,8 @@ export function createGame(host, opts) {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#121418');
-  scene.fog = new THREE.Fog('#24272c', 26, 100);
+  const FOG = new THREE.Fog('#24272c', 26, 100);
+  scene.fog = FOG;
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environmentIntensity = 0.45;
@@ -436,11 +438,121 @@ export function createGame(host, opts) {
   const GATEBOX = { x0: -3.2, x1: 3.0, z0: GATE_Z - 0.06, z1: GATE_Z + 0.06, k: 'gate', on: true };
   OBST.push(GATEBOX);
 
+  // ---------- AI graph, sensor scans, search view ----------
+  const G = buildGraph({ aisles: AISLES, NB, bayZ, rowS: -0.5, rowN: 62, rowXs: [-22, -17.6, -13.2, -8.8, -4.4, 0, 4.4, 8.8, 13.2, 17.6, 22],
+    ramp: [-32, -28, -24, -20, -16, -12, -8, -4.3], bayOff: 6.2, blocked: [{ x0: BARRIER_X - 0.25, x1: BARRIER_X + 1.2, z0: 55.1, z1: ZN + 1 }] });
+  const BAYS = G.nodes.filter((n) => n.kind === 'bay').map((n) => ({ id: n.id, name: n.name, x: n.x, z: n.z, sd: n.sd, ax: n.x - n.sd * 6.2, free: n.name === 'A-20', st: 0, seen: false, lbl: null, lt: 0 }));
+  const BAYBY = new Map(BAYS.map((b) => [b.id, b]));
+  const GOAL = BAYS.find((b) => b.free).id;
+  const LANES = G.nodes.filter((n) => n.kind === 'lane');
+  const LANEIX = new Map(LANES.map((n, i) => [n.id, i]));
+  const LABEL = { bfs: 'BFS', dfs: 'DFS', ucs: 'UCS', astar: 'A*' };
+
+  function pillTex(text, bg, icon) {
+    return ctex(512, 140, (g, w, h) => {
+      const r = 44, x = 10, y = 16, ww = w - 20, hh = h - 32;
+      g.beginPath(); g.moveTo(x + r, y); g.lineTo(x + ww - r, y); g.arcTo(x + ww, y, x + ww, y + r, r); g.lineTo(x + ww, y + hh - r); g.arcTo(x + ww, y + hh, x + ww - r, y + hh, r); g.lineTo(x + r, y + hh); g.arcTo(x, y + hh, x, y + hh - r, r); g.lineTo(x, y + r); g.arcTo(x, y, x + r, y, r); g.closePath();
+      g.fillStyle = bg; g.fill(); g.strokeStyle = 'rgba(255,255,255,.9)'; g.lineWidth = 5; g.stroke();
+      g.fillStyle = '#fff'; g.font = '800 60px Inter, system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(icon + '  ' + text, w / 2, h / 2 + 3);
+    });
+  }
+  const LBL = { occ: pillTex(T('pg_occ'), 'rgba(210,38,48,.94)', '✕'), free: pillTex(T('pg_free'), 'rgba(20,165,88,.96)', '✓') };
+  const LBLS = [];
+  function showLabel(b) {
+    if (!b.lbl) {
+      b.lbl = new THREE.Sprite(new THREE.SpriteMaterial({ map: b.free ? LBL.free : LBL.occ, transparent: true, depthWrite: false }));
+      b.lbl.position.set(b.x, 2.2, -b.z); b.lbl.renderOrder = 5; scene.add(b.lbl);
+    }
+    b.lt = S.t; b.lbl.visible = true;
+    if (!LBLS.includes(b)) LBLS.push(b);
+  }
+  const sweepMat = () => new THREE.MeshBasicMaterial({ color: '#7ff4ff', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  const boxEdges = new THREE.EdgesGeometry(new THREE.BoxGeometry(4.9, 1.72, 2.36));
+  const sweepGeo = new THREE.PlaneGeometry(2.36, 1.72); sweepGeo.rotateY(Math.PI / 2);
+  const FX = [];
+  for (let i = 0; i < 6; i++) {
+    const fg = new THREE.BufferGeometry(); fg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(9), 3));
+    const fan = new THREE.Mesh(fg, new THREE.MeshBasicMaterial({ color: '#3fd0e0', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    const sweep = new THREE.Mesh(sweepGeo, sweepMat());
+    const box = new THREE.LineSegments(boxEdges, new THREE.LineBasicMaterial({ color: '#ff4d4f', transparent: true, opacity: 0, depthWrite: false }));
+    const rg = new THREE.BufferGeometry(); rg.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(12), 3));
+    const rays = new THREE.LineSegments(rg, new THREE.LineBasicMaterial({ color: '#7ff4ff', transparent: true, opacity: 0, depthWrite: false }));
+    for (const m of [fan, sweep, box, rays]) { m.visible = false; m.frustumCulled = false; scene.add(m); }
+    FX.push({ fan, sweep, box, rays, t: -9, b: null, side: 1, revealed: true });
+  }
+  const tileGeo = new THREE.PlaneGeometry(4.9, 2.3); tileGeo.rotateX(-Math.PI / 2);
+  const tiles = new THREE.InstancedMesh(tileGeo, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.62, depthWrite: false }), BAYS.length);
+  const discGeo = new THREE.CircleGeometry(0.62, 20); discGeo.rotateX(-Math.PI / 2);
+  const discs = new THREE.InstancedMesh(discGeo, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.95, depthWrite: false }), LANES.length);
+  const M4 = new THREE.Matrix4(), Q0 = new THREE.Quaternion(), V1 = new THREE.Vector3(), V0 = new THREE.Vector3();
+  const COL = { front: new THREE.Color('#3FD0E0'), exp: new THREE.Color('#8B6CFF'), path: new THREE.Color('#FFD54A'), occ: new THREE.Color('#ff3b3b'), free: new THREE.Color('#33ff88') };
+  const DS = new Uint8Array(LANES.length);
+  function setDisc(id, kind) {
+    const i = LANEIX.get(id); if (i == null) return;
+    const n = LANES[i];
+    DS[i] = kind === 'front' ? 1 : kind === 'exp' ? 2 : kind === 'path' ? 3 : 0;
+    const sc = DS[i] ? (DS[i] === 3 ? 1.25 : DS[i] === 1 ? 1.0 : 0.72) : 0.0001;
+    M4.compose(V0.set(n.x, floorY(n.x, n.z) + 0.07, -n.z), Q0, V1.set(sc, 1, sc));
+    discs.setMatrixAt(i, M4);
+    if (DS[i]) discs.setColorAt(i, COL[kind]);
+    discs.instanceMatrix.needsUpdate = true; if (discs.instanceColor) discs.instanceColor.needsUpdate = true;
+  }
+  function setTile(b, i) {
+    M4.compose(V0.set(b.x, 1.8, -b.z), Q0, V1.setScalar(b.st ? 1 : 0.0001));
+    tiles.setMatrixAt(i, M4);
+    if (b.st) tiles.setColorAt(i, b.st === 2 ? COL.free : COL.occ);
+    tiles.instanceMatrix.needsUpdate = true; if (tiles.instanceColor) tiles.instanceColor.needsUpdate = true;
+  }
+  const BAYIX = new Map(BAYS.map((b, i) => [b.id, i]));
+  BAYS.forEach((b, i) => setTile(b, i));
+  LANES.forEach((n) => setDisc(n.id, ''));
+  tiles.visible = false; scene.add(tiles); scene.add(discs);
+  const EMAX = 400, edgePos = new Float32Array(EMAX * 18);
+  const edgeGeo = new THREE.BufferGeometry(); edgeGeo.setAttribute('position', new THREE.BufferAttribute(edgePos, 3)); edgeGeo.setDrawRange(0, 0);
+  const edges = new THREE.Mesh(edgeGeo, new THREE.MeshBasicMaterial({ color: '#3fd0e0', transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  edges.frustumCulled = false; scene.add(edges);
+  let edgeN = 0;
+  function addEdge(a, b) {
+    if (edgeN >= EMAX) return;
+    const A = G.nodes[a], B = G.nodes[b];
+    const dx = B.x - A.x, dz = B.z - A.z, L = Math.hypot(dx, dz) || 1, w = 0.13;
+    const px = -dz / L * w, pz = dx / L * w, ya = floorY(A.x, A.z) + 0.06, yb = floorY(B.x, B.z) + 0.06;
+    const q4 = [[A.x + px, ya, -(A.z + pz)], [A.x - px, ya, -(A.z - pz)], [B.x + px, yb, -(B.z + pz)], [B.x - px, yb, -(B.z - pz)]];
+    const o = edgeN * 18;
+    [q4[0], q4[1], q4[2], q4[1], q4[3], q4[2]].forEach((v, k) => { edgePos[o + k * 3] = v[0]; edgePos[o + k * 3 + 1] = v[1]; edgePos[o + k * 3 + 2] = v[2]; });
+    edgeN++;
+    edgeGeo.setDrawRange(0, edgeN * 6); edgeGeo.attributes.position.needsUpdate = true;
+  }
+  const ribbonMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    uniforms: { uTime: { value: 0 }, uCol: { value: new THREE.Color(0.22, 0.92, 1.0) } },
+    vertexShader: 'varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    fragmentShader: 'uniform float uTime; uniform vec3 uCol; varying vec2 vUv; void main(){ float c = abs(vUv.y - 0.5); float ch = fract(vUv.x * 0.55 - uTime * 0.9 + c * 0.9); float chev = smoothstep(0.0, 0.08, ch) * smoothstep(0.32, 0.2, ch) * smoothstep(0.5, 0.36, c); float edge = smoothstep(0.5, 0.46, c) * smoothstep(0.38, 0.44, c); float body = 0.16 * smoothstep(0.5, 0.3, c); gl_FragColor = vec4(uCol * (body + chev * 0.9 + edge * 0.7), 1.0); }',
+  });
+  const ribbon = new THREE.Mesh(new THREE.BufferGeometry(), ribbonMat); ribbon.frustumCulled = false; ribbon.visible = false; scene.add(ribbon);
+  function buildRibbon(pts) {
+    const pos = [], uv = [], idx = [];
+    let acc = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i], qn = pts[Math.min(pts.length - 1, i + 1)], o = pts[Math.max(0, i - 1)];
+      if (i) acc += Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]);
+      let dx = qn[0] - o[0], dz = qn[1] - o[1]; const L = Math.hypot(dx, dz) || 1; dx /= L; dz /= L;
+      const rx = dz, rz = -dx, hw = 0.5, y = floorY(p[0], p[1]) + 0.04;
+      pos.push(p[0] - rx * hw, y, -(p[1] - rz * hw), p[0] + rx * hw, y, -(p[1] + rz * hw));
+      uv.push(acc, 0, acc, 1);
+      if (i) { const b = 2 * (i - 1); idx.push(b, b + 2, b + 1, b + 1, b + 2, b + 3); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx);
+    ribbon.geometry.dispose(); ribbon.geometry = g; ribbon.visible = true;
+  }
+  const ovr = new THREE.PerspectiveCamera();
+
   // ---------- player car ----------
   const car = new THREE.Group(); scene.add(car);
   const ext = new THREE.Group(); car.add(ext);
   const PT = CAR_TYPES.sedan, PP = PARTS.sedan;
-  const paint = new THREE.MeshStandardMaterial({ color: '#16a3b8', metalness: 0.6, roughness: 0.25, envMapIntensity: 1.5 });
+  const paint = new THREE.MeshStandardMaterial({ color: '#138fa2', metalness: 0.45, roughness: 0.38, envMapIntensity: 0.85 });
   ext.add(new THREE.Mesh(PP.body, paint));
   ext.add(new THREE.Mesh(PP.glass, new THREE.MeshStandardMaterial({ color: '#101820', metalness: 0.4, roughness: 0.35, envMapIntensity: 0.7 })));
   ext.add(new THREE.Mesh(PP.black, envMats.black));
@@ -518,7 +630,7 @@ export function createGame(host, opts) {
   const rt = new THREE.WebGLRenderTarget(16, 16, { samples: 4, type: THREE.HalfFloatType });
   const composer = new EffectComposer(renderer, rt);
   composer.addPass(new RenderPass(scene, camera));
-  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.5, 0.45, 0.85);
+  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.45, 0.4, 0.92);
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
   let useBloom = true;
@@ -532,6 +644,12 @@ export function createGame(host, opts) {
     '<div class="pg-right"><button class="pg-btn pg-cam" title="C"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h3l2-3h8l2 3h3v11H3z"/><circle cx="12" cy="13" r="3.5"/></svg><span></span></button>' +
     '<button class="pg-btn pg-snd" aria-label="sound"></button>' +
     '<button class="pg-btn pg-video"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg><span></span></button></div></div>' +
+    '<div class="pg-algo"><span></span><button data-a="bfs">BFS</button><button data-a="dfs">DFS</button><button data-a="ucs">UCS</button><button data-a="astar">A*</button></div>' +
+    '<div class="pg-sp" hidden><div class="pg-sp-h"><b></b><button class="pg-sp-x" aria-label="close">✕</button></div><p class="pg-sp-d"></p>' +
+    '<div class="pg-sp-g"><div><small class="l-exp"></small><b class="v-exp">0</b></div><div><small class="l-front"></small><b class="v-front">0</b></div><div><small class="l-scan"></small><b class="v-scan">0</b></div><div><small class="l-path"></small><b class="v-path">—</b></div></div>' +
+    '<div class="pg-sp-bar"><i></i></div><div class="pg-sp-s"></div><div class="pg-sp-lg"></div>' +
+    '<div class="pg-sp-b"><button class="pg-btn2 pg-sp-skip"></button><button class="pg-btn2 pg-sp-cmp"></button></div>' +
+    '<table class="pg-tbl" hidden><thead><tr><th class="h-a"></th><th class="h-e"></th><th class="h-s"></th><th class="h-p"></th></tr></thead><tbody></tbody></table></div>' +
     '<div class="pg-stat"><span class="pg-time">0:00</span><span class="pg-hits"></span></div>' +
     '<canvas class="pg-map"></canvas>' +
     '<div class="pg-speed"><b>0</b><small></small><i>D</i></div>' +
@@ -543,7 +661,7 @@ export function createGame(host, opts) {
   host.appendChild(hud);
   const q = (s) => hud.querySelector(s);
   const mapCv = q('.pg-map'), mapG = mapCv.getContext('2d');
-  const KEYS = [['W', '↑', 'pg_k_gas'], ['S', '↓', 'pg_k_brake'], ['A D', '← →', 'pg_k_steer'], ['Shift', '', 'pg_k_boost'], ['pg_space', '', 'pg_k_hand'], ['C', '', 'pg_k_cam'], ['R', '', 'pg_k_reset'], ['H', '', 'pg_k_hide']];
+  const KEYS = [['W', '↑', 'pg_k_gas'], ['S', '↓', 'pg_k_brake'], ['A D', '← →', 'pg_k_steer'], ['Shift', '', 'pg_k_boost'], ['pg_space', '', 'pg_k_hand'], ['C', '', 'pg_k_cam'], ['R', '', 'pg_k_reset'], ['1 2 3 4', '', 'pg_k_algo'], ['H', '', 'pg_k_hide']];
   function texts() {
     q('.pg-back span').textContent = T('pg_back');
     q('.pg-video span').textContent = T('pg_video');
@@ -551,6 +669,11 @@ export function createGame(host, opts) {
     q('.pg-again').textContent = T('pg_again');
     q('.pg-wvideo').textContent = T('pg_video');
     q('.pg-wback').textContent = T('pg_back');
+    q('.pg-algo span').textContent = T('pg_algo');
+    q('.l-exp').textContent = T('pg_s_exp'); q('.l-front').textContent = T('pg_s_front'); q('.l-scan').textContent = T('pg_s_scan'); q('.l-path').textContent = T('pg_s_path');
+    q('.pg-sp-skip').textContent = T('pg_skip'); q('.pg-sp-cmp').textContent = T('pg_compare');
+    q('.h-a').textContent = T('pg_t_algo'); q('.h-e').textContent = T('pg_t_exp'); q('.h-s').textContent = T('pg_t_scan'); q('.h-p').textContent = T('pg_t_path');
+    q('.pg-sp-lg').innerHTML = [['f', 'pg_l_front'], ['e', 'pg_l_exp'], ['p', 'pg_l_path'], ['o', 'pg_l_occ'], ['g', 'pg_l_free']].map(([c, k]) => '<span><i class="' + c + '"></i>' + T(k) + '</span>').join('');
     q('.pg-keys').innerHTML = KEYS.map(([a, b, k]) => '<div><span>' + (a.startsWith('pg_') ? T(a) : a).split(' ').map((x) => '<kbd>' + x + '</kbd>').join('') + (b ? b.split(' ').map((x) => '<kbd>' + x + '</kbd>').join('') : '') + '</span><em>' + T(k) + '</em></div>').join('');
   }
   texts();
@@ -559,12 +682,15 @@ export function createGame(host, opts) {
   const S = { x: 0.4, z: -29.5, h: 0, v: 0, vl: 0, yr: 0, steer: 0, y: 2.8, pitch: 0, roll: 0, spin: 0, t: 0, run: false, paused: false, done: false, hits: 0, stage: 'gate', gateA: 0, cam: 'chase', camInit: false, still: 0, toastT: 0, closedSaid: false, parkSaid: false, shake: 0, hideKeys: false, keysT: 0, sens: 9, beepT: 0, started: false, startT: 0 };
   const keys = {};
   const touch = {};
+  const SV = { on: false, algo: null, res: null, i: 0, acc: 0, phase: '', t: 0, exp: 0, front: 0, scan: 0, results: {}, prevCam: 'chase' };
+  const AP = { on: false, pts: null, cum: null, ci: 0, still: 0, used: null };
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
   const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion();
 
   function reset() {
     Object.assign(S, { x: 0.4, z: -29.5, h: 0, v: 0, vl: 0, yr: 0, steer: 0, y: 2.8, t: 0, done: false, hits: 0, stage: 'gate', gateA: 0, camInit: false, still: 0, closedSaid: false, parkSaid: false, shake: 0, started: false });
     GATEBOX.on = true;
+    resetAI();
     q('.pg-hits').textContent = T('pg_hits', { n: 0 });
     q('.pg-win').hidden = true;
     hud.classList.remove('won');
@@ -579,17 +705,19 @@ export function createGame(host, opts) {
     else set(T('pg_win'), '');
   }
   function toast(msg, ms = 3200) { const el = q('.pg-toast'); el.textContent = msg; el.hidden = false; S.toastT = ms / 1000; }
-  const camNames = { chase: 'pg_cam_chase', cockpit: 'pg_cam_cockpit', top: 'pg_cam_top' };
+  const camNames = { chase: 'pg_cam_chase', cockpit: 'pg_cam_cockpit', top: 'pg_cam_top', overview: 'pg_cam_over' };
   function setCam(c) {
     S.cam = c; S.camInit = false;
     q('.pg-cam span').textContent = T(camNames[c]);
     cockpit.visible = c === 'cockpit';
     ext.visible = c !== 'cockpit';
-    hi.visible = c !== 'top';
-    camera.fov = c === 'cockpit' ? 64 : c === 'top' ? 50 : 60;
+    hi.visible = c !== 'top' && c !== 'overview';
+    tiles.visible = c === 'top' || c === 'overview';
+    scene.fog = c === 'overview' ? null : FOG;
+    camera.fov = c === 'cockpit' ? 64 : c === 'top' || c === 'overview' ? 50 : 60;
     camera.updateProjectionMatrix();
   }
-  function cycleCam() { setCam(S.cam === 'chase' ? 'cockpit' : S.cam === 'cockpit' ? 'top' : 'chase'); }
+  function cycleCam() { if (S.cam === 'overview') return; setCam(S.cam === 'chase' ? 'cockpit' : S.cam === 'cockpit' ? 'top' : 'chase'); }
   setCam('chase');
   objective();
 
@@ -639,12 +767,15 @@ export function createGame(host, opts) {
   function onKey(e, down) {
     if (!S.run || S.paused) return;
     const k = KMAP[e.code];
+    if (k && SV.on && (SV.phase === 'search' || SV.phase === 'path')) { e.preventDefault(); e.stopPropagation(); return; }
+    if (k && down && AP.on && (k === 'up' || k === 'down' || k === 'left' || k === 'right')) apStop(true);
     if (k) { keys[k] = down; e.preventDefault(); e.stopPropagation(); audioInit(); if (down && (k === 'up' || k === 'down') && !S.started) { S.started = true; S.startT = S.t; objective(); } return; }
     if (!down) return;
     if (e.code === 'KeyC') { cycleCam(); e.preventDefault(); }
     else if (e.code === 'KeyR') { reset(); e.preventDefault(); }
     else if (e.code === 'KeyH') { S.hideKeys = !S.hideKeys; q('.pg-keys').classList.toggle('off', S.hideKeys); }
     else if (e.code === 'KeyM') toggleSound();
+    else if (e.code === 'Digit1') runAlgo('bfs'); else if (e.code === 'Digit2') runAlgo('dfs'); else if (e.code === 'Digit3') runAlgo('ucs'); else if (e.code === 'Digit4') runAlgo('astar');
   }
   const kd = (e) => onKey(e, true), ku = (e) => onKey(e, false);
   window.addEventListener('keydown', kd, true);
@@ -664,6 +795,307 @@ export function createGame(host, opts) {
   q('.pg-again').onclick = () => reset();
   q('.pg-cam').onclick = () => cycleCam();
   q('.pg-snd').onclick = () => { audioInit(); toggleSound(); };
+  hud.querySelectorAll('.pg-algo button').forEach((b) => { b.onclick = () => runAlgo(b.dataset.a); });
+  q('.pg-sp-x').onclick = () => panelClose();
+  q('.pg-sp-skip').onclick = () => skipSearch();
+  q('.pg-sp-cmp').onclick = () => compareAll();
+
+  // ---------- sensors, search, autopilot ----------
+  let lastVoice = -9, lastTick = -9;
+  function say(text, force) {
+    if (!AU.on || !window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') return;
+    if (!force && S.t - lastVoice < 2.8) return;
+    lastVoice = S.t;
+    try { if (force) window.speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.lang = T('pg_vlang'); u.rate = 1.1; u.volume = 0.9; window.speechSynthesis.speak(u); } catch (e) { }
+  }
+  function reveal(b, fromCar) {
+    const first = b.st === 0;
+    b.st = b.free ? 2 : 1;
+    setTile(b, BAYIX.get(b.id));
+    if (b.free) {
+      showLabel(b);
+      if (first) {
+        toast(T('pg_scan_free'), 3600);
+        [880, 1175, 1568].forEach((f, i) => blip(f, 0.4, 0.2, 'sine', i * 0.09));
+        say(T('pg_v_free'), true);
+        if (S.stage === 'find') { S.stage = 'park'; objective(); }
+      }
+    } else if (fromCar) {
+      showLabel(b);
+      blip(640, 0.07, 0.12, 'square'); blip(480, 0.09, 0.1, 'square', 0.08);
+      say(T('pg_v_occ'));
+    } else if (S.t - lastTick > 0.07) { lastTick = S.t; blip(1250 + Math.random() * 300, 0.04, 0.05); }
+  }
+  function fxStart(b, side) {
+    const f = FX.reduce((a, c) => (c.t < a.t ? c : a), FX[0]);
+    if (f.b && !f.revealed) reveal(f.b, true);
+    Object.assign(f, { t: S.t, b, side, revealed: false });
+    f.box.material.color.set('#7ff4ff');
+  }
+  function carScan() {
+    if (SV.on && SV.phase !== 'drive' && SV.phase !== '') return;
+    const fx = Math.sin(S.h), fz = Math.cos(S.h), rx = Math.cos(S.h), rz = -Math.sin(S.h);
+    let n = 0;
+    for (const b of BAYS) {
+      if (b.seen || Math.abs(S.x - b.ax) > 3.4) continue;
+      const dx = b.x - S.x, dz = b.z - S.z;
+      if (Math.abs(dz) > 11) continue;
+      const lon = dx * fx + dz * fz, lat = dx * rx + dz * rz;
+      if (lon > 1.2 && lon < 9.5 && Math.abs(lat) > 2.4 && Math.abs(lat) < 9.6) { b.seen = true; fxStart(b, lat > 0 ? 1 : -1); if (++n >= 2) break; }
+    }
+  }
+  function fxTick() {
+    const fx = Math.sin(S.h), fz = Math.cos(S.h), rx = Math.cos(S.h), rz = -Math.sin(S.h);
+    for (const f of FX) {
+      const a = S.t - f.t;
+      if (!f.b || a > 2.4) { if (f.fan.visible || f.box.visible || f.rays.visible) f.fan.visible = f.sweep.visible = f.box.visible = f.rays.visible = false; continue; }
+      const b = f.b, front = b.ax + b.sd * 3.62, back = b.ax + b.sd * 8.7;
+      const ax_ = S.x + rx * 0.98 * f.side + fx * 0.75, az_ = S.z + rz * 0.98 * f.side + fz * 0.75, ay = S.y + 1.0;
+      const P = f.fan.geometry.attributes.position.array;
+      P[0] = ax_; P[1] = ay; P[2] = -az_; P[3] = front; P[4] = 1.05; P[5] = -(b.z - 1.15); P[6] = front; P[7] = 1.05; P[8] = -(b.z + 1.15);
+      f.fan.geometry.attributes.position.needsUpdate = true;
+      const RP = f.rays.geometry.attributes.position.array;
+      RP[0] = ax_; RP[1] = ay; RP[2] = -az_; RP[3] = front; RP[4] = 1.05; RP[5] = -(b.z - 1.15); RP[6] = ax_; RP[7] = ay; RP[8] = -az_; RP[9] = front; RP[10] = 1.05; RP[11] = -(b.z + 1.15);
+      f.rays.geometry.attributes.position.needsUpdate = true;
+      const fo = sstep(0, 0.14, a) * (1 - sstep(0.55, 0.85, a));
+      f.fan.material.opacity = 0.09 * fo; f.rays.material.opacity = 0.75 * fo;
+      f.fan.visible = f.rays.visible = fo > 0.005;
+      const k = sstep(0.08, 0.6, a);
+      f.sweep.position.set(lerp(front, back, k), 0.86, -b.z);
+      f.sweep.material.opacity = 0.8 * sstep(0.05, 0.12, a) * (1 - sstep(0.58, 0.72, a));
+      f.sweep.visible = f.sweep.material.opacity > 0.005;
+      if (a > 0.55 && !f.revealed) { f.revealed = true; reveal(b, true); f.box.material.color.set(b.free ? '#33ff88' : '#ff4d4f'); }
+      f.box.position.set((front + back) / 2, 0.86, -b.z);
+      f.box.material.opacity = a < 0.12 ? 0 : (a < 0.55 ? 0.35 : 1) * (1 - sstep(1.7, 2.3, a));
+      f.box.visible = f.box.material.opacity > 0.01;
+    }
+  }
+  function lblTick() {
+    const mul = S.cam === 'overview' ? 4.2 : S.cam === 'top' ? 2.2 : 1;
+    for (let i = LBLS.length - 1; i >= 0; i--) {
+      const b = LBLS[i], a = S.t - b.lt, sp = b.lbl;
+      const pop = a < 0.28 ? 0.5 + 0.62 * Math.sin(Math.min(1, a / 0.28) * Math.PI * 0.62) : 1;
+      let op = 1;
+      if (!b.free) { op = 1 - sstep(4.2, 5.2, a); if (S.cam === 'overview') op = 0; }
+      else op = 0.85 + 0.15 * Math.sin(S.t * 4);
+      sp.material.opacity = op;
+      sp.scale.set(2.1 * pop * mul, 0.58 * pop * mul, 1);
+      sp.position.y = S.cam === 'overview' ? 4 : 2.2;
+      if (!b.free && a > 5.2) { sp.visible = false; LBLS.splice(i, 1); }
+    }
+  }
+  function resetAI() {
+    apStop(false);
+    SV.on = false; SV.phase = ''; SV.res = null; SV.start = null;
+    for (const b of BAYS) { b.st = 0; b.seen = false; if (b.lbl) b.lbl.visible = false; }
+    LBLS.length = 0;
+    BAYS.forEach((b, i) => setTile(b, i));
+    for (const f of FX) { f.b = null; f.revealed = true; }
+    clearViz();
+    const sp = q('.pg-sp'); if (sp) { sp.hidden = true; q('.pg-keys').classList.remove('hid'); }
+    hud.querySelectorAll('.pg-algo button').forEach((b) => b.classList.remove('on'));
+    if (S.cam === 'overview') setCam(SV.prevCam || 'chase');
+  }
+  function clearViz() {
+    edgeN = 0; edgeGeo.setDrawRange(0, 0);
+    LANES.forEach((n) => setDisc(n.id, ''));
+    ribbon.visible = false;
+  }
+  function startNode() { return nearestLane(G, S.x, S.z, Math.sin(S.h), Math.cos(S.h)); }
+  function runAlgo(a) {
+    if (!S.run || S.paused) return;
+    if (SV.on && SV.phase === 'search') return;
+    audioInit();
+    if (S.done) reset();
+    apStop(false);
+    for (const k in keys) keys[k] = false;
+    clearViz();
+    const st0 = startNode();
+    const res = search(G, a, st0, { isFree: (n) => BAYBY.get(n.id).free, goal: GOAL });
+    SV.start = st0;
+    Object.assign(SV, { on: true, algo: a, res, i: 0, acc: 0, phase: 'search', t: 0, exp: 0, front: 0, scan: 0 });
+    if (S.cam !== 'overview') SV.prevCam = S.cam;
+    setCam('overview');
+    S.camInit = true;
+    if (!S.started) { S.started = true; S.startT = S.t; }
+    const sp = q('.pg-sp'); sp.hidden = false; q('.pg-keys').classList.add('hid');
+    sp.querySelector('.pg-sp-h b').textContent = T('pg_a_' + a);
+    q('.pg-sp-d').textContent = T('pg_d_' + a);
+    hud.querySelectorAll('.pg-algo button').forEach((b) => b.classList.toggle('on', b.dataset.a === a));
+    blip(523, 0.12, 0.15); blip(784, 0.16, 0.15, 'sine', 0.1);
+    updateStats();
+  }
+  function applyEvent(e) {
+    const kind = e[0], id = e[1];
+    if (kind === 'gen') { setDisc(id, 'front'); if (e[2] >= 0) addEdge(e[2], id); SV.front++; }
+    else if (kind === 'exp') { setDisc(id, 'exp'); SV.exp++; SV.front = e[2]; if (e[3] != null && e[3] >= 0) { } }
+    else if (kind === 'scan') { reveal(BAYBY.get(id), false); SV.scan++; }
+    else if (kind === 'done') foundPath();
+  }
+  function skipSearch() { while (SV.on && SV.phase === 'search' && SV.i < SV.res.events.length) applyEvent(SV.res.events[SV.i++]); updateStats(); }
+  function svTick(dt) {
+    if (!SV.on) return;
+    SV.t += dt;
+    if (SV.phase === 'search') {
+      const ev = SV.res.events, rate = Math.max(30, ev.length / 6.5);
+      SV.acc += dt * rate;
+      let n = Math.floor(SV.acc); SV.acc -= n;
+      while (n-- > 0 && SV.i < ev.length && SV.phase === 'search') applyEvent(ev[SV.i++]);
+      updateStats();
+    } else if (SV.phase === 'path' && SV.t > 1.8) {
+      SV.phase = 'drive';
+      setCam(SV.prevCam === 'overview' ? 'chase' : SV.prevCam || 'chase');
+      apStart();
+      updateStats();
+    }
+  }
+  function foundPath() {
+    const r = SV.res;
+    SV.phase = 'path'; SV.t = 0;
+    for (const id of r.path) setDisc(id, 'path');
+    SV.results[r.algo] = { exp: r.expanded, scan: r.scanned, m: r.cost, steps: r.steps };
+    renderTable();
+    if (r.found >= 0) {
+      AP.pts = apBuild(r.path);
+      AP.cum = [0];
+      for (let i = 1; i < AP.pts.length; i++) AP.cum.push(AP.cum[i - 1] + Math.hypot(AP.pts[i][0] - AP.pts[i - 1][0], AP.pts[i][1] - AP.pts[i - 1][1]));
+      buildRibbon(AP.pts);
+      [659, 880, 1109].forEach((f, i) => blip(f, 0.35, 0.18, 'sine', i * 0.08));
+    }
+    updateStats();
+  }
+  function chaikin(pts, it) {
+    let p = pts;
+    for (let k = 0; k < it; k++) {
+      const o = [p[0]];
+      for (let i = 0; i < p.length - 1; i++) {
+        const a = p[i], b = p[i + 1];
+        o.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25], [a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]);
+      }
+      o.push(p[p.length - 1]);
+      p = o;
+    }
+    return p;
+  }
+  function resample(pts, step) {
+    const out = [pts[0]];
+    let carry = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i];
+      const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      let d = step - carry;
+      while (d <= L) { const k = d / L; out.push([a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k]); d += step; }
+      carry = L - (d - step);
+    }
+    const last = pts[pts.length - 1];
+    if (Math.hypot(out[out.length - 1][0] - last[0], out[out.length - 1][1] - last[1]) > 0.05) out.push(last);
+    return out;
+  }
+  function apBuild(ids) {
+    const Nn = G.nodes;
+    const bay = Nn[ids[ids.length - 1]], lane = Nn[ids[ids.length - 2]] || bay;
+    const sd = bay.sd, ax = lane.x, bz = bay.z;
+    let d = 1;
+    for (let i = ids.length - 3; i >= 0; i--) { const pv = Nn[ids[i]]; if (Math.abs(pv.z - bz) > 0.5) { d = Math.sign(bz - pv.z) || 1; break; } }
+    const R = 4.2, xs = ax - sd * 2.0;
+    const pts = [[S.x, S.z]];
+    for (let i = 0; i < ids.length - 2; i++) {
+      const n = Nn[ids[i]];
+      if (Math.abs(n.x - ax) < 0.1 && (bz - n.z) * d < R + 4.5 && (bz - n.z) * d > -0.5) continue;
+      if (i === 0 && Math.hypot(n.x - S.x, n.z - S.z) < 1.5) continue;
+      pts.push([n.x, n.z]);
+    }
+    pts.push([xs, bz - d * (R + 3.2)]);
+    pts.push([xs, bz - d * R]);
+    const sm = chaikin(pts, 3);
+    const C = [xs + sd * R, bz - d * R];
+    for (let a = 6; a <= 90; a += 6) { const r = a * Math.PI / 180; sm.push([C[0] - sd * R * Math.cos(r), C[1] + d * R * Math.sin(r)]); }
+    const endX = ax + sd * 6.15;
+    for (let x = C[0] + sd * 0.5; (x - endX) * sd < 0; x += sd * 0.5) sm.push([x, bz]);
+    sm.push([endX, bz]);
+    return resample(sm, 0.4);
+  }
+  function apStart() {
+    if (!AP.pts) return;
+    AP.on = true; AP.ci = 0; AP.still = 0; AP.used = SV.algo;
+    for (const k in keys) keys[k] = false;
+  }
+  function apStop(user) {
+    if (!AP.on) return;
+    AP.on = false;
+    if (user) { toast(T('pg_takeover'), 2200); AP.used = null; }
+    if (SV.on) updateStats();
+  }
+  function apControl(dt) {
+    const P = AP.pts, cum = AP.cum;
+    let ci = AP.ci, bd = Infinity;
+    for (let j = Math.max(0, ci - 4); j < Math.min(P.length, ci + 40); j++) { const d = Math.hypot(P[j][0] - S.x, P[j][1] - S.z); if (d < bd) { bd = d; ci = j; } }
+    AP.ci = ci;
+    const remain = cum[cum.length - 1] - cum[ci] + (ci === P.length - 1 ? 0 : 0);
+    const Ld = clamp(2.3 + 0.38 * Math.abs(S.v), 2.3, 5);
+    let j = ci; while (j < P.length - 1 && cum[j] - cum[ci] < Ld) j++;
+    let tx = P[j][0], tz = P[j][1];
+    const extra = Ld - (cum[j] - cum[ci]);
+    if (j === P.length - 1 && extra > 0 && P.length > 1) { const a = P[P.length - 2], b = P[P.length - 1]; const L = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; tx += (b[0] - a[0]) / L * extra; tz += (b[1] - a[1]) / L * extra; }
+    const fx = Math.sin(S.h), fz = Math.cos(S.h), rx = Math.cos(S.h), rz = -Math.sin(S.h);
+    const dx = tx - S.x, dz = tz - S.z, lon = dx * fx + dz * fz, lat = dx * rx + dz * rz;
+    const steer = Math.atan2(2 * 2.75 * Math.sin(Math.atan2(lat, lon)), Ld);
+    let turn = 0;
+    for (let k = ci + 1; k < Math.min(P.length - 1, ci + 26); k++) {
+      const a1 = Math.atan2(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]), a2 = Math.atan2(P[k + 1][0] - P[k][0], P[k + 1][1] - P[k][1]);
+      turn += Math.abs(angDiff(a2, a1));
+    }
+    let vt = turn > 1.0 ? 2.1 : turn > 0.45 ? 3.0 : 5.0;
+    if (Math.abs(lat) > 1.2 && lon < 1) vt = 1.6;
+    if (GATEBOX.on && S.z < GATE_Z && S.z > GATE_Z - 9 && Math.abs(S.x) < 3.4) vt = Math.min(vt, Math.max(0, (GATE_Z - 2.6 - S.z) * 0.9));
+    vt = Math.min(vt, Math.sqrt(2 * 1.1 * Math.max(0, remain - 0.12)) + 0.05);
+    let acc = clamp((vt - S.v) * 2.6, -6.5, 3.2);
+    if (remain < 0.18 || (remain < 0.6 && lon < 0)) { acc = -Math.sign(S.v) * Math.min(Math.abs(S.v) / Math.max(dt, 1e-4), 6); if (Math.abs(S.v) < 0.12) { AP.on = false; S.v = 0; updateStats(); } }
+    if (Math.abs(S.v) < 0.25 && remain > 1) { AP.still += dt; if (AP.still > 3.5) { AP.on = false; toast(T('pg_s_stuck'), 3200); updateStats(); } } else AP.still = 0;
+    if (bd > 7) { AP.on = false; toast(T('pg_s_stuck'), 3200); updateStats(); }
+    return { steer, acc };
+  }
+  function panelClose() {
+    apStop(false);
+    SV.on = false; SV.phase = '';
+    q('.pg-sp').hidden = true; q('.pg-keys').classList.remove('hid');
+    hud.querySelectorAll('.pg-algo button').forEach((b) => b.classList.remove('on'));
+    clearViz();
+    if (S.cam === 'overview') setCam(SV.prevCam || 'chase');
+  }
+  function updateStats() {
+    if (!SV.res) return;
+    q('.v-exp').textContent = SV.exp; q('.v-front').textContent = Math.max(0, SV.front); q('.v-scan').textContent = SV.scan;
+    q('.v-path').textContent = SV.phase === 'search' ? '—' : Math.round(SV.res.cost) + ' ' + T('pg_m');
+    q('.pg-sp-bar i').style.width = (100 * SV.i / SV.res.events.length).toFixed(1) + '%';
+    const bay = 'A-20';
+    let st = '';
+    if (SV.phase === 'search') st = T('pg_s_searching');
+    else if (SV.phase === 'path') st = T('pg_s_found', { bay, m: Math.round(SV.res.cost), steps: SV.res.steps });
+    else if (S.done) st = T('pg_s_done', { bay });
+    else if (AP.on) st = T('pg_s_drive', { bay });
+    else st = T('pg_takeover');
+    q('.pg-sp-s').textContent = st;
+    q('.pg-sp-skip').hidden = SV.phase !== 'search';
+  }
+  function compareAll() {
+    const st = SV.start != null ? SV.start : startNode();
+    for (const a of ALGOS) {
+      const r = search(G, a, st, { isFree: (n) => BAYBY.get(n.id).free, goal: GOAL });
+      SV.results[a] = { exp: r.expanded, scan: r.scanned, m: r.cost, steps: r.steps };
+    }
+    renderTable();
+  }
+  function renderTable() {
+    const tb = q('.pg-tbl'), rows = ALGOS.filter((a) => SV.results[a]);
+    if (!rows.length) { tb.hidden = true; return; }
+    tb.hidden = false;
+    const minE = Math.min(...rows.map((a) => SV.results[a].exp)), minM = Math.min(...rows.map((a) => SV.results[a].m));
+    tb.querySelector('tbody').innerHTML = rows.map((a) => {
+      const r = SV.results[a];
+      return '<tr' + (a === SV.algo ? ' class="cur"' : '') + '><td>' + LABEL[a] + '</td><td' + (r.exp === minE ? ' class="best"' : '') + '>' + r.exp + '</td><td>' + r.scan + '</td><td' + (Math.abs(r.m - minM) < 0.5 ? ' class="best"' : '') + '>' + Math.round(r.m) + '</td></tr>';
+    }).join('');
+  }
 
   // ---------- physics ----------
   const HL = PT.L / 2, HW = PT.Wd / 2;
@@ -732,18 +1164,22 @@ export function createGame(host, opts) {
     const hand = keys.hand || touch.hand, boost = keys.boost;
     const vmax = boost ? 14 : 8.5;
     let acc = 0;
-    if (S.done) { acc = -Math.sign(S.v) * Math.min(Math.abs(S.v) / dt, 6); }
+    const ap = AP.on ? apControl(dt) : null;
+    if (ap) acc = ap.acc;
+    else if (SV.on && (SV.phase === 'search' || SV.phase === 'path')) acc = -Math.sign(S.v) * Math.min(Math.abs(S.v) / dt, 6);
+    else if (S.done) { acc = -Math.sign(S.v) * Math.min(Math.abs(S.v) / dt, 6); }
     else if (up && !down) acc = S.v < -0.25 ? 9 : (S.v < vmax ? (boost ? 6.2 : 4.0) * (1 - Math.max(0, S.v) / (vmax * 1.08)) + 0.4 : -1.5);
     else if (down && !up) acc = S.v > 0.25 ? -9 : (S.v > -3.6 ? -2.6 : 0);
     else acc = -Math.sign(S.v) * Math.min(Math.abs(S.v) / dt, 0.9 + 0.03 * S.v * S.v);
-    if (hand) acc -= Math.sign(S.v) * Math.min(Math.abs(S.v) / dt, 4.5);
+    if (hand && !ap) acc -= Math.sign(S.v) * Math.min(Math.abs(S.v) / dt, 4.5);
     if (onRamp(S.x, S.z) && S.z > -18) acc += 9.81 * 0.2 * Math.cos(S.h) * 0.25 * (hand || up || down ? 0.3 : 1);
     S.v += acc * dt;
-    if (Math.abs(S.v) < 0.03 && !up && !down) S.v = 0;
+    if (Math.abs(S.v) < 0.03 && !up && !down && !ap) S.v = 0;
     const sp = Math.abs(S.v);
     const maxSt = lerp(0.62, 0.2, clamp((sp - 2) / 10, 0, 1));
     const want = (left ? -1 : 0) + (right ? 1 : 0);
-    if (want) S.steer += clamp(want * maxSt - S.steer, -2.6 * dt, 2.6 * dt);
+    if (ap) S.steer += clamp(clamp(ap.steer, -maxSt, maxSt) - S.steer, -2.8 * dt, 2.8 * dt);
+    else if (want) S.steer += clamp(want * maxSt - S.steer, -2.6 * dt, 2.6 * dt);
     else S.steer += clamp(-S.steer, -3.4 * dt, 3.4 * dt);
     S.steer = clamp(S.steer, -maxSt, maxSt);
     const wb = 2.75;
@@ -759,7 +1195,7 @@ export function createGame(host, opts) {
     S.z += (fz * S.v + rz * S.vl) * dt;
     collide();
     // gate
-    if (S.stage === 'gate' && S.z > GATE_Z - 5.4 && Math.abs(S.x) < 3.4) { S.stage = 'gate_open'; objective(); toast(T('pg_gate_open')); blip(880, 0.25, 0.25); blip(1320, 0.35, 0.22, 'sine', 0.12); }
+    if (S.stage === 'gate' && S.z > GATE_Z - 7.5 && Math.abs(S.x) < 3.4) { S.stage = 'gate_open'; objective(); toast(T('pg_gate_open')); blip(880, 0.25, 0.25); blip(1320, 0.35, 0.22, 'sine', 0.12); }
     if (S.stage === 'gate_open') { S.gateA = Math.min(1, S.gateA + dt / 1.3); if (S.gateA > 0.55) GATEBOX.on = false; if (S.z > GATE_Z + 2.5) { S.stage = 'find'; objective(); } }
     else if (S.stage !== 'gate' && S.gateA > 0 && S.z > GATE_Z + 6) { S.gateA = Math.max(0, S.gateA - dt / 1.6); if (S.gateA < 0.5) GATEBOX.on = true; }
     gate.rotation.z = -1.42 * sstep(0, 1, S.gateA);
@@ -805,7 +1241,8 @@ export function createGame(host, opts) {
     const w = q('.pg-win');
     w.querySelector('.pg-stars').innerHTML = [0, 1, 2].map((i) => '<i class="' + (i < stars ? 'on' : '') + '">★</i>').join('');
     w.querySelector('h3').textContent = T('pg_win');
-    w.querySelector('p').textContent = T('pg_win_sub', { time: fmt(tm), hits: S.hits, acc });
+    w.querySelector('p').textContent = T('pg_win_sub', { time: fmt(tm), hits: S.hits, acc }) + (AP.used && SV.res ? '\n' + T('pg_ap_done', { algo: LABEL[AP.used], exp: SV.res.expanded, m: Math.round(SV.res.cost) }) : '');
+    if (SV.on) updateStats();
     w.hidden = false; hud.classList.add('won');
     [784, 988, 1175, 1568].forEach((f, i) => blip(f, 0.5, 0.22, 'sine', i * 0.11));
     if (opts.onWin) opts.onWin({ time: tm, hits: S.hits, acc });
@@ -831,21 +1268,40 @@ export function createGame(host, opts) {
       const [p0x, p0y] = P(Math.min(xa, xb), z), [p1x] = P(Math.max(xa, xb), z);
       g.fillStyle = 'rgba(255,255,255,.16)'; g.fillRect(p0x, p0y, p1x - p0x, 0.8);
     }
-    for (const c2 of MAPCARS) { g.fillStyle = 'rgba(150,158,170,.85)'; const r = R(c2.x - 2.2, c2.z - 0.85, c2.x + 2.2, c2.z + 0.85); g.fillRect(r[0] + 0.5, r[1] + 0.5, r[2] - 1, r[3] - 1); }
+    g.strokeStyle = 'rgba(255,255,255,.22)'; g.lineWidth = 0.6;
+    for (const b of BAYS) { const r = R(b.x - 2.4, b.z - 1.15, b.x + 2.4, b.z + 1.15); g.strokeRect(r[0] + 0.6, r[1] + 0.6, r[2] - 1.2, r[3] - 1.2); }
     g.fillStyle = '#e8e6df'; for (const p of PILLARS) g.fillRect(...R(p.x - 0.4, p.z - 0.4, p.x + 0.4, p.z + 0.4));
     g.fillStyle = '#ff4d4f'; g.fillRect(...R(BARRIER_X - 0.4, 55.1, BARRIER_X + 1.2, ZN));
     g.fillStyle = 'rgba(255,255,255,.75)'; g.font = '800 ' + Math.round(mapScale * 3.2) + 'px Inter, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
     for (const A of AISLES) { const [ax, ay] = P(A.x, -1.8); g.fillText(A.id, ax, ay); }
     const [rx, ry] = P(0, -27); g.fillText('▲', rx, ry);
-    mapStatic = { c, P, d };
+    mapStatic = { c, P, R, d };
   }
   function drawMap(now) {
     if (!mapStatic) mapSize();
-    const { c, P, d } = mapStatic;
+    const { c, P, R, d } = mapStatic;
     mapG.setTransform(1, 0, 0, 1, 0, 0);
     mapG.clearRect(0, 0, mapCv.width, mapCv.height);
     mapG.drawImage(c, 0, 0);
     mapG.setTransform(d, 0, 0, d, 0, 0);
+    for (const b of BAYS) {
+      if (!b.st || b.free) continue;
+      const r = R(b.x - 2.3, b.z - 1.05, b.x + 2.3, b.z + 1.05);
+      mapG.fillStyle = 'rgba(255,77,79,.78)'; mapG.fillRect(r[0] + 0.6, r[1] + 0.6, r[2] - 1.2, r[3] - 1.2);
+    }
+    if (SV.on) {
+      for (let i = 0; i < LANES.length; i++) {
+        if (!DS[i]) continue;
+        const [px, py] = P(LANES[i].x, LANES[i].z);
+        mapG.fillStyle = DS[i] === 1 ? '#3FD0E0' : DS[i] === 2 ? '#8B6CFF' : '#FFD54A';
+        mapG.beginPath(); mapG.arc(px, py, DS[i] === 3 ? 2.2 : 1.6, 0, 7); mapG.fill();
+      }
+    }
+    if (ribbon.visible && AP.pts) {
+      mapG.strokeStyle = 'rgba(63,208,224,.95)'; mapG.lineWidth = 2; mapG.beginPath();
+      AP.pts.forEach((p, i) => { const [px, py] = P(p[0], p[1]); if (i) mapG.lineTo(px, py); else mapG.moveTo(px, py); });
+      mapG.stroke();
+    }
     const pulse = 0.5 + 0.5 * Math.sin(now / 260);
     const [bx0, by0] = P(BAYRECT.x0, BAYRECT.z1), [bx1, by1] = P(BAYRECT.x1, BAYRECT.z0);
     mapG.fillStyle = 'rgba(52,255,130,' + (0.35 + 0.4 * pulse).toFixed(2) + ')'; mapG.fillRect(bx0, by0, bx1 - bx0, by1 - by0);
@@ -879,6 +1335,18 @@ export function createGame(host, opts) {
       eye.getWorldQuaternion(camera.quaternion);
       camera.rotateY(-S.steer * 0.12);
       camera.up.set(0, 1, 0);
+      return;
+    }
+    if (S.cam === 'overview') {
+      const asp = camera.aspect, wide = asp >= 1.15, hgt = wide ? Math.max(76, 62 / Math.min(asp, 1.8) * 1.75) : 125;
+      const span = 2 * hgt * Math.tan(25 * Math.PI / 180) * asp;
+      ovr.position.set(wide ? 0 : -1, hgt, -(wide ? 30 + span * 0.13 : 22));
+      ovr.up.set(wide ? -1 : 0, 0, wide ? 0 : -1);
+      ovr.lookAt(0, 0, ovr.position.z - 0.001);
+      const k = 1 - Math.exp(-dt * 2.6);
+      camera.position.lerp(ovr.position, k);
+      camera.quaternion.slerp(ovr.quaternion, k);
+      camPos.copy(camera.position);
       return;
     }
     if (S.cam === 'top') {
@@ -915,7 +1383,7 @@ export function createGame(host, opts) {
   }
   function frame(now) {
     raf = requestAnimationFrame(frame);
-    const dt = Math.min(0.1, (now - (last || now)) / 1000); last = now;
+    const dt = Math.min(0.1, (now - (last || now)) / 1000) * (S.ts || 1); last = now;
     if (S.paused || !(dt > 0)) return;
     S.t += dt;
     if (!S.done || Math.abs(S.v) > 0.01) {
@@ -936,6 +1404,9 @@ export function createGame(host, opts) {
     outlineMat.opacity = S.done ? 0.9 : 0.35 + 0.45 * pul;
     freeGlow.material.opacity = 0.6 + 0.35 * pul;
     gate.userData.lamp.material.color.setRGB(S.gateA > 0.5 ? 0.2 : 1, S.gateA > 0.5 ? 1 : 0.2, 0.2).multiplyScalar(3);
+    svTick(dt);
+    fxTick(); lblTick();
+    ribbonMat.uniforms.uTime.value = S.t;
     updateCamera(dt);
     if (S.toastT > 0) { S.toastT -= dt; if (S.toastT <= 0) q('.pg-toast').hidden = true; }
     // HUD
@@ -945,6 +1416,7 @@ export function createGame(host, opts) {
       q('.pg-speed i').textContent = S.v < -0.1 ? 'R' : Math.abs(S.v) < 0.05 && !(keys.up || keys.down) ? 'N' : 'D';
       q('.pg-time').textContent = fmt(S.started ? S.t - (S.startT || 0) : 0);
       if (S.cam === 'cockpit') drawCluster();
+      carScan();
       const [f, r] = sensors();
       const near = Math.min(f, r);
       const sens = q('.pg-sensor');
@@ -982,12 +1454,13 @@ export function createGame(host, opts) {
 
   return {
     start() { S.run = true; S.paused = false; last = 0; mapStatic = null; resize(); q('.pg-hits').textContent = T('pg_hits', { n: S.hits }); if (!raf) raf = requestAnimationFrame(frame); objective(); },
-    pause() { S.paused = true; for (const k in keys) keys[k] = false; if (AU.ctx) AU.eg.gain.setTargetAtTime(0, AU.ctx.currentTime, 0.05); if (AU.sq) AU.sq.gain.setTargetAtTime(0, AU.ctx.currentTime, 0.05); },
+    pause() { try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) { } S.paused = true; for (const k in keys) keys[k] = false; if (AU.ctx) AU.eg.gain.setTargetAtTime(0, AU.ctx.currentTime, 0.05); if (AU.sq) AU.sq.gain.setTargetAtTime(0, AU.ctx.currentTime, 0.05); },
     resume() { S.paused = false; last = 0; },
     texts() { texts(); objective(); setCam(S.cam); },
     audio: audioInit,
     destroy() {
       cancelAnimationFrame(raf); raf = 0; S.run = false;
+      try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) { }
       window.removeEventListener('keydown', kd, true); window.removeEventListener('keyup', ku, true);
       window.removeEventListener('blur', blur); window.removeEventListener('resize', resize);
       try { if (AU.ctx) AU.ctx.close(); } catch (e) { }
@@ -998,5 +1471,6 @@ export function createGame(host, opts) {
       canvas.remove(); hud.remove();
     },
     debug: () => S,
+    debugAI: () => ({ BAYS, FX, SV, AP, ext }),
   };
 }
