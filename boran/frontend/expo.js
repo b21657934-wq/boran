@@ -12,7 +12,7 @@
 
   function create(ctx) {
     const T = (k, v) => ctx.t(k, v);
-    const st = { open: false, busy: false, url: null, loading: null, prog: 0, timers: [], hideT: 0, tagOn: false };
+    const st = { open: false, busy: false, url: null, loading: null, prog: 0, timers: [], hideT: 0, tagOn: false, mod: null, game: null, gameFail: false };
     const later = (ms, fn) => { const id = setTimeout(fn, ms); st.timers.push(id); return id; };
     const clear = () => { st.timers.forEach(clearTimeout); st.timers = []; };
 
@@ -30,12 +30,13 @@
     root.innerHTML =
       '<div class="ex-tunnel"><div class="ex-wall l"></div><div class="ex-wall r"></div><div class="ex-ceil"></div><div class="ex-floor"></div><div class="ex-fog"></div></div>' +
       '<div class="ex-lift"><small class="ex-k"></small><div class="ex-num"><b>P</b><span class="ex-d"><i>0</i><i>−1</i></span></div><p class="ex-say"></p><div class="ex-load" hidden><i></i></div></div>' +
+      '<div class="ex-game-host"></div>' +
       '<video playsinline preload="auto" poster="' + POSTER + '"></video>' +
       '<button class="ex-big" hidden aria-label="play">' + ICON.play + '</button>' +
-      '<div class="ex-ui"><button class="ex-back glass">' + ICON.up + '<span></span></button><div class="ex-title glass"><b>P −1</b><span></span></div>' +
+      '<div class="ex-ui"><button class="ex-back glass">' + ICON.up + '<span></span></button><div class="ex-title glass"><b>P −1</b><span></span></div><button class="ex-togame glass"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="7" width="19" height="11" rx="4"/><path d="M7 10.5v4M5 12.5h4M15.5 11.5h.01M18 13.5h.01"/></svg><span></span></button>' +
       '<button class="ex-sound glass" hidden>' + ICON.on + '<span></span></button>' +
       '<div class="ex-bar glass"><button class="ex-play" aria-label="play"></button><div class="ex-prog"><i></i></div><span class="ex-time">0:00</span><button class="ex-mute" aria-label="sound"></button></div></div>' +
-      '<div class="ex-end glass" hidden><h3></h3><p></p><div><button class="cta ex-again"></button><button class="btn2 ex-out"></button></div></div>' +
+      '<div class="ex-end glass" hidden><h3></h3><p></p><div><button class="cta ex-again"></button><button class="btn2 ex-endgame"></button><button class="btn2 ex-out"></button></div></div>' +
       '<div class="ex-iris"></div>';
     document.body.appendChild(root);
     const q = (s) => root.querySelector(s);
@@ -53,6 +54,9 @@
       q('.ex-end p').textContent = T('ex_done_sub');
       q('.ex-again').textContent = T('ex_again');
       q('.ex-out').textContent = T('ex_back');
+      q('.ex-togame span').textContent = T('ex_togame');
+      q('.ex-endgame').textContent = T('ex_togame');
+      if (st.game) st.game.texts();
     }
     texts();
 
@@ -122,6 +126,52 @@
     q('.ex-again').onclick = () => { q('.ex-end').hidden = true; V.currentTime = 0; V.play().catch(() => {}); poke(); };
     q('.ex-back').onclick = () => leave();
     q('.ex-out').onclick = () => leave();
+    q('.ex-togame').onclick = () => toGame();
+    q('.ex-endgame').onclick = () => toGame();
+    const host = q('.ex-game-host');
+
+    function loadGame() {
+      if (!st.mod) st.mod = import('./parking/game.js');
+      return st.mod;
+    }
+    function buildGame() {
+      return loadGame().then((mod) => {
+        if (!st.open) return null;
+        if (!st.game) st.game = mod.createGame(host, { t: T, onVideo: () => showVideo(), onExit: () => leave() });
+        return st.game;
+      });
+    }
+    function startGame() {
+      if (!st.open || !st.game) return;
+      phase('game');
+      st.game.start();
+    }
+    function toGame() {
+      if (!st.game) return;
+      try { V.pause(); } catch (e) { }
+      q('.ex-end').hidden = true; q('.ex-sound').hidden = true; q('.ex-big').hidden = true;
+      phase('game');
+      st.game.resume();
+    }
+    function showVideo() {
+      if (!st.open) return;
+      if (st.game) st.game.pause();
+      unlock();
+      q('.ex-end').hidden = true;
+      const go = () => { if (st.open && !root.classList.contains('game')) startVideo(); };
+      if (st.url) { startVideo(); return; }
+      phase('dive tunnel below vload');
+      q('.ex-say').textContent = T('ex_loading', { p: 0 });
+      q('.ex-load').hidden = false;
+      const tick = () => {
+        if (!st.open || st.url) return;
+        q('.ex-say').textContent = T('ex_loading', { p: Math.round(st.prog * 100) });
+        q('.ex-load').firstChild.style.width = (st.prog * 100).toFixed(1) + '%';
+        later(150, tick);
+      };
+      tick();
+      prefetch().then(() => { q('.ex-load').hidden = true; go(); }).catch(() => { q('.ex-say').textContent = T('ex_fail'); later(1800, () => { if (st.game) toGame(); }); });
+    }
 
     function phase(name) { root.className = name; }
 
@@ -130,7 +180,8 @@
       if (V.src !== st.url) V.src = st.url;
       try { V.currentTime = 0; } catch (e) { }
       V.muted = false;
-      phase('playing ui');
+      root.classList.toggle('hasgame', !!st.game);
+      phase('playing ui' + (st.game ? ' hasgame' : ''));
       poke();
       try { await V.play(); } catch (e) {
         V.muted = true;
@@ -165,17 +216,20 @@
       root.hidden = false;
       phase('dive');
       const t0 = performance.now();
-      prefetch().catch(() => {
-        if (!st.open) return;
-        q('.ex-load').hidden = true;
-        q('.ex-say').textContent = T('ex_fail');
-        later(2600, () => leave());
-      });
+      prefetch().catch(() => {});
       if (m) m.flyTo({ center: SPHERE, zoom: Math.min(m.getMaxZoom(), 18.3), pitch: Math.min(m.getMaxPitch(), 68), bearing: m.getBearing(), duration: 1500, essential: true, curve: 1.2 });
+      loadGame().catch(() => {});
       later(1450, () => phase('dive tunnel'));
+      later(1600, () => { buildGame().catch(() => { st.gameFail = true; }); });
       later(2050, () => phase('dive tunnel below'));
-      later(2200, () => { if (st.url || st.loading) q('.ex-say').textContent = T('ex_level'); });
-      later(400, () => waitVideo(t0));
+      later(2200, () => q('.ex-say').textContent = T('ex_level'));
+      const waitGame = () => {
+        if (!st.open) return;
+        if (st.gameFail) { waitVideo(t0); return; }
+        if (st.game && performance.now() - t0 > 3400) { startGame(); return; }
+        later(120, waitGame);
+      };
+      later(400, waitGame);
       return true;
     }
 
@@ -186,8 +240,10 @@
       try { V.pause(); } catch (e) { }
       q('.ex-end').hidden = true; q('.ex-big').hidden = true; q('.ex-sound').hidden = true; q('.ex-load').hidden = true;
       q('.ex-say').textContent = T('ex_up');
+      if (st.game) st.game.pause();
       phase('dive tunnel below rise');
       later(150, () => phase('dive tunnel rise'));
+      later(500, () => { if (st.game) { try { st.game.destroy(); } catch (e) { } st.game = null; } });
       later(1350, () => {
         const m = ctx.map();
         if (m) m.jumpTo({ center: SPHERE, zoom: Math.min(m.getMaxZoom(), 17.6), pitch: Math.min(m.getMaxPitch(), 62), bearing: m.getBearing() });
@@ -204,7 +260,7 @@
     document.addEventListener('keydown', (e) => {
       if (!st.open) return;
       if (e.key === 'Escape') { e.stopPropagation(); leave(); }
-      else if (e.key === ' ' && root.classList.contains('playing')) { e.preventDefault(); if (V.paused) V.play().catch(() => {}); else V.pause(); poke(); }
+      else if (e.key === ' ' && root.classList.contains('playing') && !root.classList.contains('game')) { e.preventDefault(); if (V.paused) V.play().catch(() => {}); else V.pause(); poke(); }
     }, true);
 
     function tick() {
@@ -226,6 +282,7 @@
       enter,
       leave,
       isOpen: () => st.open,
+      game: () => st.game,
       hit: (x, y) => { const lm = ctx.lm(); return !!lm && ctx.canEnter() && lm.hit('nuralem', x, y); },
       prefetch,
     };

@@ -568,7 +568,7 @@
       } });
     if (!LM && window.BoranLandmarks) LM = window.BoranLandmarks.create({ map: () => map, isNight });
     if (!PRECIP && window.BoranPrecip) PRECIP = window.BoranPrecip.create({ map: () => map, isNight, weather: () => S.args && S.args.weather && S.args.weather.now });
-    if (!EXPO && window.BoranExpo) EXPO = window.BoranExpo.create({ map: () => map, lm: () => LM, t, canEnter: expoAllowed,
+    if (!EXPO && window.BoranExpo) window.__expo = EXPO = window.BoranExpo.create({ map: () => map, lm: () => LM, t, canEnter: expoAllowed,
       onOpen: () => { $('scn-menu').hidden = true; $('mark-pop').hidden = true; $('place-list').hidden = true; $('brain').hidden = true; $('marks').hidden = true; closeAlgos(); } });
     if (!HALL && window.BoranHall) HALL = window.BoranHall.create({ map: () => map, t, toast, hideExtras, forceNight, setWind: (k) => { S.windK = k; },
       now: () => Date.now() / 1000 + (S.skew || 0),
