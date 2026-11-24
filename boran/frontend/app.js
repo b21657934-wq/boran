@@ -513,11 +513,21 @@
       const k = /^b-(ice|park|wood)-(city|game|night)$/.exec(ev.id);
       if (k && !map.hasImage(ev.id)) map.addImage(ev.id, patternImage(k[1], k[2]), { pixelRatio: 2 });
     });
-    map.on('click', (ev) => onMapClick({ coordinate: [ev.lngLat.lng, ev.lngLat.lat], x: ev.point.x, y: ev.point.y }));
+    map.on('click', (ev) => {
+      if (EXPO && EXPO.hit(ev.point.x, ev.point.y) && EXPO.enter()) return;
+      onMapClick({ coordinate: [ev.lngLat.lng, ev.lngLat.lat], x: ev.point.x, y: ev.point.y });
+    });
+    map.on('mousemove', (ev) => {
+      const h = !!(EXPO && EXPO.hit(ev.point.x, ev.point.y));
+      if (h === !!S.expoHover) return;
+      S.expoHover = h;
+      map.getCanvas().style.cursor = h ? 'pointer' : '';
+      if (h) EXPO.prefetch().catch(() => {});
+    });
     map.on('error', (ev) => { if (ev && ev.error && /style|layers\[/.test(String(ev.error.message))) console.warn(ev.error.message); });
     window.__map = map;
     if (NAV) NAV.stop(true);
-    NAV = window.BoranNav ? window.BoranNav.create({ map, t, isNight, lang: () => S.lang, onStart: navStart, onExit: navExit, onView: (v) => { S.windK = v === 'fp' ? 0 : 0.3; }, roadsNear, onShare: () => openShare('arrived') }) : null;
+    NAV = window.BoranNav ? window.BoranNav.create({ map, t, isNight, lang: () => S.lang, onStart: navStart, onExit: navExit, onView: (v) => { S.windK = v === 'fp' ? 0 : 0.3; }, roadsNear, onShare: () => openShare('arrived'), miniStyle }) : null;
     if (!NIGHT && window.BoranNight) NIGHT = window.BoranNight.create({ map: () => map, t, version: () => S.args && S.args.nightV,
       setRisk: (tb) => { S.nightRisk = tb; S.riskTable = tb || (S.args && S.args.riskTable); pushRisk(); },
       onOpen: () => { if (NAV && NAV.active()) NAV.stop(); if (HALL) HALL.close(); $('brain').hidden = true; $('marks').hidden = true; closeAlgos(); $('panel').classList.add('min'); $('btn-night').setAttribute('aria-pressed', 'true'); },
@@ -536,8 +546,8 @@
         return m2;
       } });
     if (!LM && window.BoranLandmarks) LM = window.BoranLandmarks.create({ map: () => map, isNight });
-    if (!WIND && window.BoranWind) WIND = window.BoranWind.create({ map: () => map, isNight,
-      weather: () => S.windWx || (S.args && S.args.weather && S.args.weather.now), strength: () => (S.windK == null ? 1 : S.windK) });
+    if (!EXPO && window.BoranExpo) EXPO = window.BoranExpo.create({ map: () => map, lm: () => LM, t, canEnter: expoAllowed,
+      onOpen: () => { $('scn-menu').hidden = true; $('mark-pop').hidden = true; $('place-list').hidden = true; $('brain').hidden = true; $('marks').hidden = true; closeAlgos(); } });
     if (!HALL && window.BoranHall) HALL = window.BoranHall.create({ map: () => map, t, toast, hideExtras, forceNight, setWind: (k) => { S.windK = k; },
       now: () => Date.now() / 1000 + (S.skew || 0),
       url: () => (S.args && S.args.hallUrl) || location.href,
@@ -691,52 +701,16 @@
     if (!map || !S.city || !S.args || document.hidden) return;
     if ((S.windTick = (S.windTick || 0) + 1) % 20 === 0 && map.isStyleLoaded()) {
       if (LM && !map.getLayer('b-monuments')) LM.attach();
-      if (WIND && !map.getLayer('b-wind')) WIND.attach();
     }
     if (now - (S.lastAnim || 0) > 33) { S.lastAnim = now; animate(now); animateCompare(now); }
-    drawSnow(now);
+    if (EXPO) EXPO.tick();
+    if (now - (S.lastFrost || 0) > 500) { S.lastFrost = now; frostEdge(); }
   }
 
 
-  const snow = { cv: $('snow'), ctx: $('snow').getContext('2d'), parts: [], w: 0, h: 0, last: 0 };
-  function sizeSnow() {
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    snow.w = window.innerWidth; snow.h = window.innerHeight;
-    snow.cv.width = snow.w * dpr; snow.cv.height = snow.h * dpr;
-    snow.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-  window.addEventListener('resize', sizeSnow); sizeSnow();
-  function drawSnow(now) {
-    const dt = Math.min(0.05, (now - (snow.last || now)) / 1000); snow.last = now;
+  function frostEdge() {
     const wx = S.args.weather.now;
     const cold = wx.temp < 2;
-    const target = !cold ? 0 : Math.round((40 + Math.min(1, wx.snow / 2) * 520 + Math.min(1, wx.wind / 18) * 160) * Math.min(1.4, (snow.w * snow.h) / 900000 + 0.45));
-    while (snow.parts.length < target) snow.parts.push({ x: Math.random() * snow.w, y: Math.random() * snow.h, z: 0.35 + Math.random() * 0.65, ph: Math.random() * 6.28 });
-    if (snow.parts.length > target) snow.parts.length = target;
-    const bearing = (map ? map.getBearing() : 0) * Math.PI / 180;
-    const dir = Math.sin((wx.wdir + 180) * Math.PI / 180 - bearing);
-    const vx = dir * wx.wind * 26 + (dir >= 0 ? 12 : -12), vy = 70 + wx.snow * 30 + wx.wind * 5;
-    const streak = Math.min(1, Math.max(0, (wx.wind - 7) / 9));
-    const g = snow.ctx;
-    g.clearRect(0, 0, snow.w, snow.h);
-    g.strokeStyle = g.fillStyle = isNight() ? 'rgba(235,245,255,.85)' : 'rgba(255,255,255,.95)';
-    g.lineCap = 'round';
-    if (!isNight()) { g.shadowColor = 'rgba(40,70,120,.35)'; g.shadowBlur = 2; } else { g.shadowBlur = 0; }
-    for (const p of snow.parts) {
-      const sx = vx * p.z + Math.sin(now / 900 + p.ph) * 10, sy = vy * p.z;
-      p.x += sx * dt; p.y += sy * dt;
-      if (p.y > snow.h + 10) { p.y = -10; p.x = Math.random() * snow.w; }
-      if (p.x > snow.w + 20) p.x = -20; else if (p.x < -20) p.x = snow.w + 20;
-      g.globalAlpha = 0.35 + 0.6 * p.z;
-      if (streak > 0.05) {
-        const k = 0.018 + streak * 0.03;
-        g.lineWidth = 0.8 + p.z * 1.1;
-        g.beginPath(); g.moveTo(p.x, p.y); g.lineTo(p.x - sx * k, p.y - sy * k); g.stroke();
-      } else {
-        g.beginPath(); g.arc(p.x, p.y, 0.8 + p.z * 1.5, 0, 6.283); g.fill();
-      }
-    }
-    g.globalAlpha = 1;
     const sev = Math.min(1, wx.wind / 18) * 0.6 + Math.min(1, wx.snow / 2) * 0.4 + (wx.temp < -25 ? 0.35 : 0);
     $('frost').style.opacity = cold ? Math.min(0.9, 0.15 + sev * 0.8).toFixed(2) : '0';
   }
@@ -785,6 +759,7 @@
 
   function renderAll() {
     renderWho();
+    if (EXPO) EXPO.texts();
     const a = S.args, wx = a.weather, now = wx.now;
     document.documentElement.lang = S.lang === 'kk' ? 'kk' : S.lang;
     $('t-brain').textContent = t('brain'); $('t-scn').textContent = t('scn'); $('t-ice').textContent = t('r_btn'); $('t-night').textContent = t('nt_btn'); $('t-hall').textContent = t('hl_btn'); $('t-from').textContent = t('from'); $('t-to').textContent = t('to');
@@ -1414,13 +1389,28 @@
     const btn = $('btn-theme');
     if (btn && btn.dataset.th !== theme()) { btn.dataset.th = theme(); btn.innerHTML = ico[theme()]; btn.title = t('theme_' + theme()); }
   }
-  let NAV = null, NIGHT = null, HALL = null, WIND = null, LM = null;
+  let NAV = null, NIGHT = null, HALL = null, LM = null, EXPO = null;
+  function expoAllowed() {
+    try {
+      return !!S.args && !document.body.classList.contains('intro') && !(NAV && NAV.active()) && !(NIGHT && NIGHT.active())
+        && !(HALL && (HALL.active() || HALL.phoneOn())) && !TOUR.on && !S.picking && !S.markMode;
+    } catch (e) { return false; }
+  }
   const MONUMENT_IDS = [2304016452, 2304016442, 14618133342, 4607037782, 4607037772, 5079534652, 5079534722, 4607037792, 5079534680];
   function forceNight(on) { if (!!S.nightForce === !!on) return; S.nightForce = !!on; themeBody(); applyStyle(); }
   function hideExtras(on, which) {
     S.nightHide = on ? (which instanceof RegExp ? which : which ? /^b-(warm|marks|repseg|points|route|short|ride|runner|wave|cmp|heat)/ : /^b-(warm|marks|repseg|points|route|short|ride|runner|wave|cmp)/) : null;
     const st = map && map.getStyle();
     if (st) st.layers.forEach((l) => { if (/^b-/.test(l.id) && !/^b-landmarks/.test(l.id)) map.setLayoutProperty(l.id, 'visibility', S.nightHide && S.nightHide.test(l.id) ? 'none' : 'visible'); });
+  }
+  function miniStyle() {
+    if (!map || !map.getStyle()) return null;
+    const st = JSON.parse(JSON.stringify(map.getStyle()));
+    st.layers = st.layers.filter((l) => !/^(b-|nt-|n-)/.test(l.id) || l.id === 'b-landmarks');
+    st.layers.forEach((l) => { if (/^highway-name|^poi_|^b-landmarks/.test(l.id) && l.layout) l.layout.visibility = 'visible'; if (/^road_one_way/.test(l.id)) { l.layout = l.layout || {}; l.layout.visibility = 'none'; } });
+    Object.keys(st.sources).forEach((k) => { if (/^(b-|nt-|n-)/.test(k) && k !== 'b-landmarks') delete st.sources[k]; });
+    delete st.terrain; delete st.sky;
+    return st;
   }
   const NAV_HIDE = /^b-(?!landmarks|heat)|^highway-name|^road_one_way|^poi_/;
   function navLayers(show) {

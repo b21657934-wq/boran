@@ -101,7 +101,7 @@
   function grade(h) {
     let g = document.getElementById('grade');
     if (h == null) { if (g) g.style.opacity = '0'; return; }
-    if (!g) { g = document.createElement('div'); g.id = 'grade'; document.body.insertBefore(g, document.getElementById('snow')); }
+    if (!g) { g = document.createElement('div'); g.id = 'grade'; document.body.insertBefore(g, document.getElementById('frost')); }
     let i = 1;
     while (i < GRADE.length - 1 && GRADE[i][0] < h) i++;
     const a = GRADE[i - 1], b = GRADE[i], k = Math.max(0, Math.min(1, (h - a[0]) / (b[0] - a[0])));

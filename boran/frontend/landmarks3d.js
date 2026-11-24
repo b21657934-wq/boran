@@ -211,7 +211,24 @@ void main(){
   }
 
   function create(ctx) {
-    const st = { prog: null, loc: null, sites: [] };
+    const st = { prog: null, loc: null, sites: [], scr: {} };
+    function clip(F, x, y, z) {
+      const w = F[3] * x + F[7] * y + F[11] * z + F[15];
+      return [(F[0] * x + F[4] * y + F[8] * z + F[12]) / w, (F[1] * x + F[5] * y + F[9] * z + F[13]) / w, w];
+    }
+    function remember(id, F, m) {
+      const c = m.getCanvas(), W = c.clientWidth, H = c.clientHeight;
+      const px = (x, y, z) => { const q = clip(F, x, y, z); return q[2] > 0 ? [(q[0] + 1) / 2 * W, (1 - q[1]) / 2 * H] : null; };
+      const ctr = px(0, 0, 60), base = px(0, 0, 0);
+      if (!ctr || !base) { st.scr[id] = null; return; }
+      let r = 0;
+      [[40, 0, 60], [-40, 0, 60], [0, 40, 60], [0, -40, 60], [0, 0, 100], [0, 0, 20]].forEach((v) => { const q = px(v[0], v[1], v[2]); if (q) r = Math.max(r, Math.hypot(q[0] - ctr[0], q[1] - ctr[1])); });
+      let br = 0;
+      [[26, 0, 0], [-26, 0, 0], [0, 26, 0], [0, -26, 0]].forEach((v) => { const q = px(v[0], v[1], v[2]); if (q) br = Math.max(br, Math.hypot(q[0] - base[0], q[1] - base[1])); });
+      let top = ctr[1];
+      [[0, 0, 100], [0, 40, 60], [0, -40, 60]].forEach((v) => { const q = px(v[0], v[1], v[2]); if (q) top = Math.min(top, q[1]); });
+      st.scr[id] = { x: ctr[0], y: ctr[1], r, bx: base[0], by: base[1], br, top, W, H, zoom: m.getZoom() };
+    }
     function shader(gl, type, src) {
       const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
       if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) console.warn('landmarks shader', gl.getShaderInfoLog(s));
@@ -256,6 +273,7 @@ void main(){
         for (const s of st.sites) {
           const F = mul(P, s.model), I = inv(F);
           if (!I) continue;
+          if (s.id === 'nuralem') remember(s.id, F, this.map);
           const e = [I[8], I[9], I[10], I[11]];
           const w = Math.abs(e[3]) > 1e-12 ? e[3] : 1e-12;
           gl.uniform3f(st.loc.eye, e[0] / w, e[1] / w, e[2] / w);
@@ -274,6 +292,15 @@ void main(){
       },
     };
     return {
+      screen(id) { return st.scr[id] || null; },
+      hit(id, x, y) {
+        const s = st.scr[id];
+        if (!s || s.r < 6) return false;
+        if (Math.hypot(x - s.x, y - s.y) <= s.r * 1.03) return true;
+        const dx = s.x - s.bx, dy = s.y - s.by, L = dx * dx + dy * dy || 1;
+        const k = Math.max(0, Math.min(1, ((x - s.bx) * dx + (y - s.by) * dy) / L));
+        return Math.hypot(x - (s.bx + dx * k), y - (s.by + dy * k)) <= Math.max(s.br, s.r * 0.45);
+      },
       attach() {
         const m = ctx.map();
         if (!m || !m.isStyleLoaded() || m.getLayer('b-monuments')) return;

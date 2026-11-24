@@ -1113,6 +1113,7 @@
       if (run) {
         dynamic();
         run.uiT = (run.uiT || 0) + dtR;
+        mmUpdate(performance.now());
         if (run.uiT > 0.25) { run.uiT = 0; hud().bar.style.width = (progress() * 100).toFixed(1) + '%'; hud().eta.textContent = strings()('n_left', { min: remainingMin() }); miniUpdate(); }
       }
     }
@@ -1150,7 +1151,9 @@
       root.innerHTML = '<div class="nav-top glass"><div class="nav-ico"></div><div class="nav-txt"><b></b><small></small></div></div>' +
         '<div class="nav-sig" hidden><i></i><span></span></div>' +
         '<div class="nav-frame" hidden><i class="l"></i><i class="r"></i><i class="t"></i><i class="b"></i></div>' +
-        '<div class="nav-mini glass"><svg viewBox="0 0 200 200"></svg></div><div class="nav-street" hidden></div>' +
+        '<div class="nav-mini glass"><svg class="m-svg" viewBox="0 0 200 200"></svg><div class="mm-map" hidden></div>' +
+        '<div class="mm-me" hidden><svg viewBox="0 0 120 120"><defs><radialGradient id="mmcone" cx="60" cy="60" r="62" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#0B9AB5" stop-opacity=".55"/><stop offset="1" stop-color="#0B9AB5" stop-opacity="0"/></radialGradient></defs><path class="mm-cone" d="M60 60 L30 6 A62 62 0 0 1 90 6 Z" fill="url(#mmcone)"/><circle cx="60" cy="60" r="10.5"/><path d="M60 52 L66 66 L60 62.5 L54 66 Z"/></svg></div>' +
+        '<div class="mm-n" hidden><i></i><b></b></div></div><div class="nav-street" hidden></div>' +
         '<div class="nav-bar glass"><button class="nav-play" aria-label="pause"></button><div class="nav-prog"><i></i></div><span class="nav-eta"></span>' +
         '<div class="nav-view" role="group" aria-label="' + T('n_view') + '"><button data-v="nav">' + T('n_view_nav') + '</button><button data-v="fp">' + T('n_view_fp') + '</button></div>' +
         '<div class="nav-speed" role="group" aria-label="' + T('n_speed') + '">' + [1, 2, 3, 4, 5].map((k) => '<button data-k="' + k + '">' + k + '×</button>').join('') + '</div>' +
@@ -1158,7 +1161,7 @@
         '<div class="nav-fin glass" hidden><h3>' + T('n_arrive') + '</h3><p></p><div><button class="cta nav-again">' + T('n_again') + '</button><button class="btn2 nav-share">' + T('n_share') + '</button><button class="btn2 nav-close">' + T('n_close') + '</button></div></div>';
       document.body.appendChild(root);
       const q = (s) => root.querySelector(s);
-      const h = { root, icon: q('.nav-ico'), main: q('.nav-txt b'), sub: q('.nav-txt small'), sig: q('.nav-sig'), frame: q('.nav-frame'), bar: q('.nav-prog i'), eta: q('.nav-eta'), fin: q('.nav-fin'), play: q('.nav-play'), speed: q('.nav-speed'), mini: q('.nav-mini svg'), street: q('.nav-street'), view: q('.nav-view') };
+      const h = { root, icon: q('.nav-ico'), main: q('.nav-txt b'), sub: q('.nav-txt small'), sig: q('.nav-sig'), frame: q('.nav-frame'), bar: q('.nav-prog i'), eta: q('.nav-eta'), fin: q('.nav-fin'), play: q('.nav-play'), speed: q('.nav-speed'), mini: q('.nav-mini .m-svg'), miniBox: q('.nav-mini'), mm: q('.mm-map'), mmMe: q('.mm-me'), mmN: q('.mm-n'), street: q('.nav-street'), view: q('.nav-view') };
       h.view.querySelectorAll('button').forEach((b) => { b.onclick = () => api.setView(b.dataset.v); });
       const playIcon = () => { h.play.innerHTML = run && run.paused ? '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg>' : '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></svg>'; };
       playIcon();
@@ -1191,6 +1194,58 @@
         '<circle cx="' + ax.toFixed(1) + '" cy="' + ay.toFixed(1) + '" r="5" class="m-a"/><rect x="' + (bx - 5).toFixed(1) + '" y="' + (by - 5).toFixed(1) + '" width="10" height="10" rx="2" class="m-b"/>' +
         '<g class="m-me"><circle r="7"/><path d="M0 -5 L4 4 L0 2 L-4 4 Z"/></g>';
       run.miniMe = svg.querySelector('.m-me');
+      mmBuild(samp, first, last);
+    }
+    function mmBuild(samp, first, last) {
+      run.mm = null;
+      const ML = window.maplibregl, h = run.hud;
+      const style = ML && ctx.miniStyle ? ctx.miniStyle() : null;
+      if (!style || !Object.keys(style.sources).some((k) => !/^b-/.test(k))) return;
+      const ll = (p) => run.F.ll(p);
+      const line = (k, pts) => ({ type: 'Feature', properties: { k }, geometry: { type: 'LineString', coordinates: pts.map(ll) } });
+      const dot = (k, p) => ({ type: 'Feature', properties: { k }, geometry: { type: 'Point', coordinates: ll(p) } });
+      const dark = night();
+      style.sources['mm-route'] = { type: 'geojson', data: FC(samp.map(([k, pts]) => line(k, pts))) };
+      style.sources['mm-ends'] = { type: 'geojson', data: FC([dot('a', first), dot('b', last)]) };
+      style.layers.push(
+        { id: 'mm-case', type: 'line', source: 'mm-route', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': dark ? '#0B1220' : '#FFFFFF', 'line-width': 9 } },
+        { id: 'mm-walk', type: 'line', source: 'mm-route', filter: ['==', ['get', 'k'], 'w'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': dark ? '#7FE7F5' : '#0B9AB5', 'line-width': 5 } },
+        { id: 'mm-ride', type: 'line', source: 'mm-route', filter: ['==', ['get', 'k'], 'r'], layout: { 'line-cap': 'butt', 'line-join': 'round' }, paint: { 'line-color': dark ? '#B9A6FF' : '#6C4CE0', 'line-width': 5, 'line-dasharray': [1.4, 1] } },
+        { id: 'mm-a', type: 'circle', source: 'mm-ends', filter: ['==', ['get', 'k'], 'a'], paint: { 'circle-radius': 6, 'circle-color': '#FFFFFF', 'circle-stroke-color': '#0B9AB5', 'circle-stroke-width': 3 } },
+        { id: 'mm-b', type: 'circle', source: 'mm-ends', filter: ['==', ['get', 'k'], 'b'], paint: { 'circle-radius': 7, 'circle-color': '#E8743B', 'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 2.5 } });
+      h.miniBox.classList.add('has-mm');
+      h.mm.hidden = false; h.mmMe.hidden = false; h.mmN.hidden = false;
+      h.mmN.querySelector('b').textContent = strings()('mm_north');
+      h.miniBox.title = strings()('mm_zoom');
+      run.mmZoom = 16.6;
+      let m2;
+      try {
+        m2 = new ML.Map({ container: h.mm, style, center: ll(first), zoom: run.mmZoom, bearing: run.tr || 0, pitch: 0, interactive: false, attributionControl: false, fadeDuration: 0, maxZoom: 19 });
+      } catch (e) { h.miniBox.classList.remove('has-mm'); h.mm.hidden = true; h.mmMe.hidden = true; h.mmN.hidden = true; return; }
+      m2.on('styleimagemissing', (ev) => { if (!m2.hasImage(ev.id)) m2.addImage(ev.id, { width: 1, height: 1, data: new Uint8Array(4) }); });
+      const pad = () => { const r = h.mm.getBoundingClientRect(); m2.setPadding({ top: Math.round(r.height * 0.32), bottom: 0, left: 0, right: 0 }); };
+      m2.once('load', () => { pad(); m2.resize(); });
+      pad();
+      h.miniBox.onclick = () => { if (!run || !run.mm) return; run.mmZoom = run.mmZoom > 16 ? 15.2 : 16.6; run.mmEase = performance.now(); };
+      run.mm = m2;
+      run.mmT = 0;
+    }
+    function mmUpdate(now) {
+      const m2 = run.mm;
+      if (!m2 || now - (run.mmT || 0) < 33) return;
+      run.mmT = now;
+      const W = run.meW || (run.cam && run.cam.W);
+      if (!W) return;
+      const b = run.tr == null ? (run.cam ? run.cam.hd : 0) : run.tr;
+      let z = run.mmZoom;
+      if (run.mmEase) { const k = Math.min(1, (now - run.mmEase) / 450); z = m2.getZoom() + (run.mmZoom - m2.getZoom()) * (k < 1 ? 0.25 : 1); if (k >= 1) run.mmEase = 0; }
+      const cur = m2.getBearing();
+      let db = ((b - cur + 540) % 360) - 180;
+      m2.jumpTo({ center: run.F.ll(W), bearing: cur + db * 0.35, zoom: z });
+      const nb = m2.getBearing().toFixed(1);
+      run.hud.mmN.style.transform = 'rotate(' + (-nb) + 'deg)';
+      run.hud.mmN.lastChild.style.transform = 'rotate(' + nb + 'deg)';
+      run.hud.mmMe.classList.toggle('fp', run.view === 'fp');
     }
     function miniUpdate() {
       if (!run.mini || !run.miniMe) return;
@@ -1273,6 +1328,7 @@
         if (!run) return;
         cancelAnimationFrame(run.raf);
         map.off('styledata', run.onStyle);
+        if (run.mm) { try { run.mm.remove(); } catch (e) { } run.mm = null; }
         run.hud.root.remove();
         if (run.me) run.me.remove();
         document.body.classList.remove('navfp');
