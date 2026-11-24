@@ -14,11 +14,17 @@
   }
 
   function flakeSet(night) {
-    const rim = night ? 'rgba(160,190,230,0)' : 'rgba(70,95,130,0.22)';
-    return {
-      sharp: sprite([[0, 'rgba(255,255,255,1)'], [0.32, 'rgba(255,255,255,0.95)'], [0.55, 'rgba(250,253,255,0.55)'], [0.72, rim], [1, 'rgba(255,255,255,0)']], 64),
-      soft: sprite([[0, 'rgba(255,255,255,0.9)'], [0.45, 'rgba(255,255,255,0.45)'], [0.75, night ? 'rgba(255,255,255,0.08)' : 'rgba(90,110,140,0.1)'], [1, 'rgba(255,255,255,0)']], 64),
+    if (night) return {
+      sharp: sprite([[0, 'rgba(255,255,255,1)'], [0.32, 'rgba(255,255,255,0.95)'], [0.55, 'rgba(250,253,255,0.55)'], [0.75, 'rgba(200,220,255,0.12)'], [1, 'rgba(255,255,255,0)']], 64),
+      soft: sprite([[0, 'rgba(255,255,255,0.9)'], [0.45, 'rgba(255,255,255,0.45)'], [0.75, 'rgba(255,255,255,0.08)'], [1, 'rgba(255,255,255,0)']], 64),
       bokeh: sprite([[0, 'rgba(255,255,255,0.32)'], [0.55, 'rgba(255,255,255,0.2)'], [0.82, 'rgba(255,255,255,0.08)'], [1, 'rgba(255,255,255,0)']], 128),
+      k: 1,
+    };
+    return {
+      sharp: sprite([[0, 'rgba(255,255,255,1)'], [0.36, 'rgba(255,255,255,1)'], [0.5, 'rgba(236,242,250,0.9)'], [0.62, 'rgba(70,92,125,0.5)'], [0.8, 'rgba(70,92,125,0.16)'], [1, 'rgba(70,92,125,0)']], 64),
+      soft: sprite([[0, 'rgba(255,255,255,0.95)'], [0.4, 'rgba(250,252,255,0.7)'], [0.6, 'rgba(80,100,135,0.32)'], [0.85, 'rgba(80,100,135,0.08)'], [1, 'rgba(80,100,135,0)']], 64),
+      bokeh: sprite([[0, 'rgba(255,255,255,0.45)'], [0.5, 'rgba(240,245,252,0.3)'], [0.75, 'rgba(90,110,140,0.14)'], [1, 'rgba(90,110,140,0)']], 128),
+      k: 1.3,
     };
   }
 
@@ -146,7 +152,7 @@
         p.x += vx * dt; p.y += vy * dt;
         if (p.y > st.H + 30) { Object.assign(p, newFlake(false)); }
         if (p.x > st.W + 40) p.x -= st.W + 80; else if (p.x < -40) p.x += st.W + 80;
-        const r = p.r;
+        const r = p.r * set.k;
         if (p.f < 1) p.f = Math.min(1, p.f + dt * 1.6);
         if (p.big) {
           g.globalAlpha = 0.5 * Math.min(1, I * 2.2) * p.f;
@@ -219,7 +225,7 @@
       const haze = clamp(sI * 0.55 + clamp((wd.w - 8) / 10, 0, 1) * sI * 0.6, 0, 0.75);
       if (haze > 0.01) {
         const gr = g.createLinearGradient(0, 0, 0, st.H);
-        const c = st.night ? '190,205,230' : '245,248,252';
+        const c = st.night ? '190,205,230' : '228,234,243';
         gr.addColorStop(0, 'rgba(' + c + ',' + (0.32 * haze).toFixed(3) + ')');
         gr.addColorStop(0.45, 'rgba(' + c + ',' + (0.16 * haze).toFixed(3) + ')');
         gr.addColorStop(1, 'rgba(' + c + ',' + (0.06 * haze).toFixed(3) + ')');
