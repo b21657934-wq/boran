@@ -26,7 +26,7 @@ const angDiff = (a, b) => { let d = (a - b) % (Math.PI * 2); if (d > Math.PI) d 
 const AISLES = [{ x: -17.6, id: 'A', col: '#c8463c' }, { x: 0, id: 'B', col: '#2d8a9e' }, { x: 17.6, id: 'C', col: '#3f9a5b' }];
 const XA = -17.6;
 const BAY = 2.6, Z0 = 3.0, NB = 20, CEIL = 2.9;
-const WX = 26.8, ZS = -4.3, ZN = 69.4, ZROW = Z0 + BAY * NB, ZR0 = -29.5;
+const WX = 26.8, ZS = -4.3, ZN = 69.4, ZROW = Z0 + BAY * NB, ZR0 = -35;
 const bayZ = (k) => Z0 + BAY * (k + 0.5);
 const FREE = { x: XA - 6.15, z: bayZ(19), led: XA - 3.78 };
 const BAYRECT = { x0: XA - 8.8, x1: XA - 3.6, z0: Z0 + BAY * 19, z1: Z0 + BAY * 20 };
@@ -43,7 +43,7 @@ export function createGame(host, opts) {
   canvas.className = 'pg-canvas';
   host.appendChild(canvas);
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
-  let pr = Math.min(1.5, window.devicePixelRatio || 1);
+  let pr = Math.min(1.25, window.devicePixelRatio || 1);
   renderer.setPixelRatio(pr);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
@@ -91,7 +91,7 @@ export function createGame(host, opts) {
     for (let z = 4.3; z < ZROW; z += 5.2) LIGHTS.push({ x: A.x - 6.2, z }, { x: A.x + 6.2, z });
   }
   for (let x = -24; x <= 24; x += 6) { if (Math.abs(x) > 4) LIGHTS.push({ x, z: -1.0, rot: true }); LIGHTS.push({ x, z: 59.5, rot: true }, { x, z: 65.0, rot: true }); }
-  for (const z of [-28, -24.5, -21, -17.5, -14, -10.5, -7]) LIGHTS.push({ x: 0, z, ramp: true });
+  for (const z of [-33, -29.5, -26, -22.5, -19, -15.5, -12, -8.5]) LIGHTS.push({ x: 0, z, ramp: true });
 
   const PX = 30;
   const fw = Math.round(2 * WX * PX), fh = Math.round((ZN - ZS) * PX);
@@ -442,7 +442,7 @@ export function createGame(host, opts) {
   const PT = CAR_TYPES.sedan, PP = PARTS.sedan;
   const paint = new THREE.MeshStandardMaterial({ color: '#16a3b8', metalness: 0.6, roughness: 0.25, envMapIntensity: 1.5 });
   ext.add(new THREE.Mesh(PP.body, paint));
-  ext.add(new THREE.Mesh(PP.glass, envMats.glass));
+  ext.add(new THREE.Mesh(PP.glass, new THREE.MeshStandardMaterial({ color: '#101820', metalness: 0.4, roughness: 0.35, envMapIntensity: 0.7 })));
   ext.add(new THREE.Mesh(PP.black, envMats.black));
   ext.add(new THREE.Mesh(PP.plate, envMats.plate));
   const hlMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#f4f8ff').multiplyScalar(2.6) });
@@ -556,14 +556,14 @@ export function createGame(host, opts) {
   texts();
 
   // ---------- state ----------
-  const S = { x: 0.4, z: -25.8, h: 0, v: 0, vl: 0, yr: 0, steer: 0, y: 2.8, pitch: 0, roll: 0, spin: 0, t: 0, run: false, paused: false, done: false, hits: 0, stage: 'gate', gateA: 0, cam: 'chase', camInit: false, still: 0, toastT: 0, closedSaid: false, parkSaid: false, shake: 0, hideKeys: false, keysT: 0, sens: 9, beepT: 0, started: false, startT: 0 };
+  const S = { x: 0.4, z: -29.5, h: 0, v: 0, vl: 0, yr: 0, steer: 0, y: 2.8, pitch: 0, roll: 0, spin: 0, t: 0, run: false, paused: false, done: false, hits: 0, stage: 'gate', gateA: 0, cam: 'chase', camInit: false, still: 0, toastT: 0, closedSaid: false, parkSaid: false, shake: 0, hideKeys: false, keysT: 0, sens: 9, beepT: 0, started: false, startT: 0 };
   const keys = {};
   const touch = {};
   const camPos = new THREE.Vector3(), camLook = new THREE.Vector3();
   const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion();
 
   function reset() {
-    Object.assign(S, { x: 0.4, z: -25.8, h: 0, v: 0, vl: 0, yr: 0, steer: 0, y: 2.8, t: 0, done: false, hits: 0, stage: 'gate', gateA: 0, camInit: false, still: 0, closedSaid: false, parkSaid: false, shake: 0, started: false });
+    Object.assign(S, { x: 0.4, z: -29.5, h: 0, v: 0, vl: 0, yr: 0, steer: 0, y: 2.8, t: 0, done: false, hits: 0, stage: 'gate', gateA: 0, camInit: false, still: 0, closedSaid: false, parkSaid: false, shake: 0, started: false });
     GATEBOX.on = true;
     q('.pg-hits').textContent = T('pg_hits', { n: 0 });
     q('.pg-win').hidden = true;
@@ -813,7 +813,7 @@ export function createGame(host, opts) {
   const fmt = (s) => { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 
   // ---------- minimap ----------
-  const MAPB = { x0: -28, x1: 28, z0: -30.5, z1: 70.5 };
+  const MAPB = { x0: -28, x1: 28, z0: -36, z1: 70.5 };
   let mapStatic = null, mapScale = 1;
   function mapSize() {
     const w = mapCv.clientWidth || 150, h = mapCv.clientHeight || 270, d = Math.min(2, window.devicePixelRatio || 1);
@@ -836,7 +836,7 @@ export function createGame(host, opts) {
     g.fillStyle = '#ff4d4f'; g.fillRect(...R(BARRIER_X - 0.4, 55.1, BARRIER_X + 1.2, ZN));
     g.fillStyle = 'rgba(255,255,255,.75)'; g.font = '800 ' + Math.round(mapScale * 3.2) + 'px Inter, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
     for (const A of AISLES) { const [ax, ay] = P(A.x, -1.8); g.fillText(A.id, ax, ay); }
-    const [rx, ry] = P(0, -24); g.fillText('▲', rx, ry);
+    const [rx, ry] = P(0, -27); g.fillText('▲', rx, ry);
     mapStatic = { c, P, d };
   }
   function drawMap(now) {
@@ -915,7 +915,7 @@ export function createGame(host, opts) {
   }
   function frame(now) {
     raf = requestAnimationFrame(frame);
-    const dt = Math.min(0.05, (now - (last || now)) / 1000); last = now;
+    const dt = Math.min(0.1, (now - (last || now)) / 1000); last = now;
     if (S.paused || !(dt > 0)) return;
     S.t += dt;
     if (!S.done || Math.abs(S.v) > 0.01) {
@@ -973,7 +973,7 @@ export function createGame(host, opts) {
     ft.push(dt);
     if (ft.length >= 90) {
       const avg = ft.reduce((a, b) => a + b, 0) / ft.length; ft = [];
-      if (avg > 0.034) {
+      if (avg > 0.034 && !document.hidden) {
         if (pr > 1) { pr = 1; renderer.setPixelRatio(pr); resize(); }
         else if (useBloom) useBloom = false;
       }
