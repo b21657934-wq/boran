@@ -59,13 +59,14 @@ def parse(js):
     return {"source": "live", "now": now, "past": past, "ahead": ahead, "night": not bool(cur.get("is_day", 1)), "date": cur["time"][:10]}
 
 
-def _series(temps, snow, wind, wdir=250, hum=82, start_hour=20):
+def _series(temps, snow, wind, wdir=250, hum=82, start_hour=20, rain=None):
     out = []
     for i, t in enumerate(temps):
         w = wind[i]
         app = t - 0.9 * w if t < 5 else t
         hh = (start_hour + i) % 24
-        out.append(_hour(f"{hh:02d}:00", float(t), round(app, 1), float(snow[i]), float(snow[i]), float(w), float(wdir), float(hum)))
+        wet = float(snow[i]) + (float(rain[i]) if rain else 0.0)
+        out.append(_hour(f"{hh:02d}:00", float(t), round(app, 1), wet, float(snow[i]), float(w), float(wdir), float(hum)))
     return out
 
 
@@ -81,12 +82,16 @@ SCENARIOS = {
     "snow_after_thaw": dict(temps=[2, 2, 1, 0, -1, -2, -3, -4, -4, -5, -5, -6, -6, -7, -7, -8, -8, -8],
                             snow=[0.2, 0.3, 0, 0, 0, 0.5, 0.8, 1, 1, 0.8, 0.5, 0.3, 0.3, 0.2, 0.1, 0, 0, 0],
                             wind=[4, 4, 5, 5, 6, 7, 7, 8, 8, 7, 7, 6, 6, 5, 5, 4, 4, 4], start=6, night=True),
+    "freezing_rain": dict(temps=[5, 5, 4, 4, 3, 3, 3, 2, 2, 2, 1, 1, 0, -1, -2, -3, -4, -5],
+                          snow=[0] * 18,
+                          rain=[0, 0, 0, 0.2, 0.5, 0.8, 1.0, 1.4, 1.8, 2.0, 1.9, 1.7, 1.2, 0.6, 0.2, 0, 0, 0],
+                          wind=[4, 4, 5, 5, 5, 6, 6, 7, 7, 7, 6, 6, 6, 5, 5, 4, 4, 4], start=6, night=False),
 }
 
 
 def scenario(name):
     sc = SCENARIOS[name]
-    hours = _series(sc["temps"], sc["snow"], sc["wind"], start_hour=sc["start"])
+    hours = _series(sc["temps"], sc["snow"], sc["wind"], start_hour=sc["start"], rain=sc.get("rain"))
     past, ahead = hours[:PAST], hours[PAST:]
     return {"source": name, "now": dict(past[-1]), "past": past, "ahead": ahead, "night": sc["night"], "date": ""}
 

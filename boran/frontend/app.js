@@ -498,6 +498,26 @@
   }
 
   const VIEW0 = { center: [71.4305, 51.1283], zoom: 15.4, pitch: 58, bearing: -28 };
+  function widenEyeLevelTiles(m) {
+    const tr = m.transform, proto = tr && Object.getPrototypeOf(tr);
+    if (!proto || typeof proto.coveringTiles !== 'function' || typeof tr.clone !== 'function') return;
+    const orig = proto.coveringTiles;
+    tr.coveringTiles = function (opts) {
+      const ids = orig.call(this, opts);
+      try {
+        if (this.zoom <= 21 || opts.maxzoom == null || opts.maxzoom > this.zoom - 2) return ids;
+        const wide = this.clone();
+        wide.zoom = 20.6;
+        const seen = new Set(ids.map((i) => i.key));
+        const Ctor = ids.length ? ids[0].constructor : null, oz = ids.length ? ids[0].overscaledZ : 0;
+        for (const i of orig.call(wide, opts)) {
+          const j = Ctor ? new Ctor(oz, i.wrap, i.canonical.z, i.canonical.x, i.canonical.y) : i;
+          if (!seen.has(j.key)) { seen.add(j.key); ids.push(j); }
+        }
+      } catch (e) { }
+      return ids;
+    };
+  }
   async function initMap() {
     if (map) { map.remove(); $('map').innerHTML = ''; styleKey = null; }
     const [s, w, n, e] = S.city.bbox;
@@ -505,6 +525,7 @@
       container: 'map', style: flatStyle(theme()), center: VIEW0.center, zoom: VIEW0.zoom, pitch: VIEW0.pitch, bearing: VIEW0.bearing,
       maxPitch: 70, minZoom: 10.5, maxZoom: 18.5, attributionControl: false, maxBounds: [[w - 0.25, s - 0.15], [e + 0.25, n + 0.15]], antialias: true,
     });
+    widenEyeLevelTiles(map);
     map.addControl(new ML.AttributionControl({ compact: true }), 'bottom-right');
     const foldAttrib = () => { const a = document.querySelector('.maplibregl-ctrl-attrib'); if (a) { a.classList.add('maplibregl-compact'); a.classList.remove('maplibregl-compact-show'); a.removeAttribute('open'); } };
     map.once('load', () => setTimeout(foldAttrib, 400)); map.on('styledata', () => setTimeout(foldAttrib, 400));
@@ -546,6 +567,7 @@
         return m2;
       } });
     if (!LM && window.BoranLandmarks) LM = window.BoranLandmarks.create({ map: () => map, isNight });
+    if (!PRECIP && window.BoranPrecip) PRECIP = window.BoranPrecip.create({ map: () => map, isNight, weather: () => S.args && S.args.weather && S.args.weather.now });
     if (!EXPO && window.BoranExpo) EXPO = window.BoranExpo.create({ map: () => map, lm: () => LM, t, canEnter: expoAllowed,
       onOpen: () => { $('scn-menu').hidden = true; $('mark-pop').hidden = true; $('place-list').hidden = true; $('brain').hidden = true; $('marks').hidden = true; closeAlgos(); } });
     if (!HALL && window.BoranHall) HALL = window.BoranHall.create({ map: () => map, t, toast, hideExtras, forceNight, setWind: (k) => { S.windK = k; },
@@ -704,16 +726,9 @@
     }
     if (now - (S.lastAnim || 0) > 33) { S.lastAnim = now; animate(now); animateCompare(now); }
     if (EXPO) EXPO.tick();
-    if (now - (S.lastFrost || 0) > 500) { S.lastFrost = now; frostEdge(); }
+    if (PRECIP && !(EXPO && EXPO.isOpen())) PRECIP.draw(now);
   }
 
-
-  function frostEdge() {
-    const wx = S.args.weather.now;
-    const cold = wx.temp < 2;
-    const sev = Math.min(1, wx.wind / 18) * 0.6 + Math.min(1, wx.snow / 2) * 0.4 + (wx.temp < -25 ? 0.35 : 0);
-    $('frost').style.opacity = cold ? Math.min(0.9, 0.15 + sev * 0.8).toFixed(2) : '0';
-  }
 
   function placeName(p) {
     if (!p) return '—';
@@ -772,7 +787,9 @@
     $('wx-src').classList.toggle('scn', !live);
     $('wx-feel').textContent = t('feels', { v: num(Math.round(now.apparent)) });
     $('wx-wind').textContent = num(now.wind, 0) + ' ' + t('ms');
-    $('wx-snow').textContent = num(now.snow, 1) + ' ' + t('mmh');
+    const rainy = PRECIP && PRECIP.kind() === 'rain';
+    $('wx-snow').textContent = num(rainy ? now.precip : now.snow, 1) + ' ' + t('mmh');
+    $('wx-pi').setAttribute('d', rainy ? 'M7 14.5a4 4 0 0 1 .4-8 5 5 0 0 1 9.6 1.4 3.3 3.3 0 0 1 0 6.6H7zM8.5 17.5l-1 3M12.5 17.5l-1 3M16.5 17.5l-1 3' : 'M12 2v20M3.3 7l17.4 10M20.7 7L3.3 17');
     $('wx-hum').textContent = num(now.hum, 0) + '%';
     $('wx-arrow').style.transform = 'rotate(' + (now.wdir + 180) + 'deg)';
     spark(wx);
@@ -1389,7 +1406,7 @@
     const btn = $('btn-theme');
     if (btn && btn.dataset.th !== theme()) { btn.dataset.th = theme(); btn.innerHTML = ico[theme()]; btn.title = t('theme_' + theme()); }
   }
-  let NAV = null, NIGHT = null, HALL = null, LM = null, EXPO = null;
+  let NAV = null, NIGHT = null, HALL = null, LM = null, EXPO = null, PRECIP = null;
   function expoAllowed() {
     try {
       return !!S.args && !document.body.classList.contains('intro') && !(NAV && NAV.active()) && !(NIGHT && NIGHT.active())

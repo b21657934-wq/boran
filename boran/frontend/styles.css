@@ -750,3 +750,5 @@ body.navmode #expo-tag{display:none}
 #expo.rise .ex-wall{animation-direction:reverse}
 @media (prefers-reduced-motion:reduce){#expo .ex-wall{animation:none}}
 #expo-tag.below::after{bottom:auto;top:-6px;transform:rotate(225deg)}
+#precip{position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:2}
+#frost .frost-cv{position:absolute;inset:0;width:100%;height:100%;-webkit-mask-image:radial-gradient(ellipse 78% 74% at 50% 48%,transparent 52%,rgba(0,0,0,.6) 74%,#000 100%);mask-image:radial-gradient(ellipse 78% 74% at 50% 48%,transparent 52%,rgba(0,0,0,.6) 74%,#000 100%)}
