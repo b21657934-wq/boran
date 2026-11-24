@@ -1409,6 +1409,12 @@
     st.layers = st.layers.filter((l) => !/^(b-|nt-|n-)/.test(l.id) || l.id === 'b-landmarks');
     st.layers.forEach((l) => { if (/^highway-name|^poi_|^b-landmarks/.test(l.id) && l.layout) l.layout.visibility = 'visible'; if (/^road_one_way/.test(l.id)) { l.layout = l.layout || {}; l.layout.visibility = 'none'; } });
     Object.keys(st.sources).forEach((k) => { if (/^(b-|nt-|n-)/.test(k) && k !== 'b-landmarks') delete st.sources[k]; });
+    st.layers.forEach((l) => {
+      if (l.type !== 'fill-extrusion') return;
+      const c = (l.paint && l.paint['fill-extrusion-color']) || '#D9D3C7';
+      l.type = 'fill';
+      l.paint = { 'fill-color': c, 'fill-opacity': 0.9 };
+    });
     delete st.terrain; delete st.sky;
     return st;
   }

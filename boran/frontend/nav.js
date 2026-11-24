@@ -1217,7 +1217,7 @@
       h.mm.hidden = false; h.mmMe.hidden = false; h.mmN.hidden = false;
       h.mmN.querySelector('b').textContent = strings()('mm_north');
       h.miniBox.title = strings()('mm_zoom');
-      run.mmZoom = 16.6;
+      run.mmZoom = 16.2;
       let m2;
       try {
         m2 = new ML.Map({ container: h.mm, style, center: ll(first), zoom: run.mmZoom, bearing: run.tr || 0, pitch: 0, interactive: false, attributionControl: false, fadeDuration: 0, maxZoom: 19 });
@@ -1226,7 +1226,7 @@
       const pad = () => { const r = h.mm.getBoundingClientRect(); m2.setPadding({ top: Math.round(r.height * 0.32), bottom: 0, left: 0, right: 0 }); };
       m2.once('load', () => { pad(); m2.resize(); });
       pad();
-      h.miniBox.onclick = () => { if (!run || !run.mm) return; run.mmZoom = run.mmZoom > 16 ? 15.2 : 16.6; run.mmEase = performance.now(); };
+      h.miniBox.onclick = () => { if (!run || !run.mm) return; run.mmZoom = run.mmZoom > 15.6 ? 15 : 16.2; run.mmEase = performance.now(); };
       run.mm = m2;
       run.mmT = 0;
     }
