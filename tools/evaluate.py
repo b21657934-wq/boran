@@ -164,10 +164,13 @@ def write_md(res):
         L.append(f"| {r['walk_min']:.0f} | {r['level']} | {r['trend']} | {q.get('go')} | {q.get('wait')} | {q.get('transit')} | **{r['best']}** | **{r['best_no_bus']}** |")
     pk = res["parking"]
     if "runs" in pk:
-        L += ["", "## 4. Parking game: search for the only free bay (A-20)", "", "| Start | Algorithm | Nodes expanded | Bays checked | Path, m |", "|---|---|---|---|---|"]
+        L += ["", f"## 4. Parking game: maze garage, {len(pk['free'])} free bays ({', '.join(pk['free'])})", "",
+              f"Graph: {pk['nodes']} nodes ({pk['lanes']} lane nodes, {pk['bays']} bays). Four passages cut the parking islands, four walls close aisles and lanes.", "",
+              "| Start | Algorithm | Bay found | Nodes expanded | Bays checked | Steps | Path, m |", "|---|---|---|---|---|---|---|"]
         for run in pk["runs"]:
             for a in run["algos"]:
-                L.append(f"| {run['start']} | {a['algo']} | {a['expanded']} | {a['scanned']} | {a['cost']} |")
+                label = a['algo'].replace('*', '\\*')
+                L.append(f"| {run['start']} | {label} | {a['found']} | {a['expanded']} | {a['scanned']} | {a['steps']} | {a['cost']} |")
     L += ["", f"## 5. Unit tests", "", f"`pytest -q`: {res['tests']['python']}  ", f"`node --test tests/js/parking_ai.test.mjs`: {res['tests']['js']}", ""]
     return "\n".join(L)
 

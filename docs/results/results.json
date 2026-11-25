@@ -212,7 +212,7 @@
     "cost_gap_vs_optimal_pct_mean": 39.2,
     "optimal_runs": 0,
     "fall_pct_mean": 10.338,
-    "ms_median": 11.2
+    "ms_median": 9.3
    },
    "dfs": {
     "runs": 25,
@@ -221,7 +221,7 @@
     "cost_gap_vs_optimal_pct_mean": 8142.8,
     "optimal_runs": 0,
     "fall_pct_mean": 91.464,
-    "ms_median": 23.5
+    "ms_median": 20.7
    },
    "ucs": {
     "runs": 25,
@@ -230,7 +230,7 @@
     "cost_gap_vs_optimal_pct_mean": 0.0,
     "optimal_runs": 25,
     "fall_pct_mean": 7.242,
-    "ms_median": 31.9
+    "ms_median": 34.3
    },
    "greedy": {
     "runs": 25,
@@ -248,7 +248,7 @@
     "cost_gap_vs_optimal_pct_mean": 0.0,
     "optimal_runs": 25,
     "fall_pct_mean": 7.242,
-    "ms_median": 23.8
+    "ms_median": 22.0
    }
   },
   "astar_vs_ucs_fewer_expansions_pct": 47.6,
@@ -814,125 +814,111 @@
   }
  ],
  "parking": {
-  "nodes": 210,
-  "lanes": 90,
-  "bays": 120,
+  "nodes": 174,
+  "lanes": 78,
+  "bays": 96,
+  "free": [
+   "A-20",
+   "B-17",
+   "C-14",
+   "C-17",
+   "C-28"
+  ],
   "runs": [
    {
     "start": "ramp (entrance)",
     "algos": [
      {
       "algo": "BFS",
-      "found": "A-20",
-      "expanded": 83,
-      "scanned": 117,
-      "steps": 32,
-      "cost": 105
+      "found": "C-28",
+      "expanded": 49,
+      "scanned": 52,
+      "steps": 23,
+      "cost": 90
      },
      {
       "algo": "DFS",
       "found": "A-20",
-      "expanded": 86,
-      "scanned": 119,
-      "steps": 32,
-      "cost": 105
+      "expanded": 34,
+      "scanned": 35,
+      "steps": 31,
+      "cost": 141
+     },
+     {
+      "algo": "Greedy",
+      "found": "C-14",
+      "expanded": 28,
+      "scanned": 22,
+      "steps": 25,
+      "cost": 125
      },
      {
       "algo": "UCS",
-      "found": "A-20",
-      "expanded": 87,
-      "scanned": 120,
-      "steps": 32,
-      "cost": 105
+      "found": "B-17",
+      "expanded": 52,
+      "scanned": 55,
+      "steps": 25,
+      "cost": 80
      },
      {
       "algo": "A*",
-      "found": "A-20",
-      "expanded": 57,
-      "scanned": 80,
-      "steps": 32,
-      "cost": 105
+      "found": "B-17",
+      "expanded": 35,
+      "scanned": 31,
+      "steps": 25,
+      "cost": 80
      }
     ]
    },
    {
-    "start": "aisle C, middle",
+    "start": "aisle C, south",
     "algos": [
      {
       "algo": "BFS",
-      "found": "A-20",
-      "expanded": 88,
-      "scanned": 119,
-      "steps": 40,
-      "cost": 126
+      "found": "C-28",
+      "expanded": 49,
+      "scanned": 52,
+      "steps": 15,
+      "cost": 73
      },
      {
       "algo": "DFS",
       "found": "A-20",
-      "expanded": 79,
-      "scanned": 119,
-      "steps": 60,
-      "cost": 190
+      "expanded": 49,
+      "scanned": 53,
+      "steps": 21,
+      "cost": 88
+     },
+     {
+      "algo": "Greedy",
+      "found": "C-14",
+      "expanded": 20,
+      "scanned": 22,
+      "steps": 15,
+      "cost": 73
      },
      {
       "algo": "UCS",
-      "found": "A-20",
-      "expanded": 89,
-      "scanned": 120,
-      "steps": 40,
-      "cost": 126
+      "found": "B-17",
+      "expanded": 52,
+      "scanned": 55,
+      "steps": 17,
+      "cost": 63
      },
      {
       "algo": "A*",
-      "found": "A-20",
-      "expanded": 83,
-      "scanned": 120,
-      "steps": 40,
-      "cost": 126
-     }
-    ]
-   },
-   {
-    "start": "north row, east",
-    "algos": [
-     {
-      "algo": "BFS",
-      "found": "A-20",
-      "expanded": 88,
-      "scanned": 119,
-      "steps": 48,
-      "cost": 149
-     },
-     {
-      "algo": "DFS",
-      "found": "A-20",
-      "expanded": 79,
-      "scanned": 119,
-      "steps": 52,
-      "cost": 167
-     },
-     {
-      "algo": "UCS",
-      "found": "A-20",
-      "expanded": 89,
-      "scanned": 120,
-      "steps": 48,
-      "cost": 149
-     },
-     {
-      "algo": "A*",
-      "found": "A-20",
-      "expanded": 83,
-      "scanned": 120,
-      "steps": 48,
-      "cost": 149
+      "found": "B-17",
+      "expanded": 27,
+      "scanned": 31,
+      "steps": 17,
+      "cost": 63
      }
     ]
    }
   ]
  },
  "tests": {
-  "python": "47 passed in 1.88s",
-  "js": "pass 7, fail 0"
+  "python": "47 passed in 1.36s",
+  "js": "pass 9, fail 0"
  }
 }

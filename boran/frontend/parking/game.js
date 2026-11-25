@@ -6,15 +6,16 @@ import { OutputPass } from './OutputPass.js';
 import { RoomEnvironment } from './RoomEnvironment.js';
 import { mergeGeometries } from './BufferGeometryUtils.js';
 import { buildGraph, search, nearestLane, ALGOS } from './ai.js';
+import { AISLES, BAY, Z0, NB, WX, ZS, ZN, ZROW, bayZ, PASSAGES, WALLS, FREE_BAYS, START, inGap, bayName, wallRect, passageZ, passageSpan, aisleX, graphConfig } from './layout.js';
 
 const FALLBACK = {
   pg_obj_gate: 'Drive up to the barrier', pg_obj_gate_s: 'Your plate is read automatically',
   pg_gate_open: 'Plate 777 ABC 01 recognised · welcome', pg_obj_find: 'Find the free bay',
-  pg_obj_find_s: 'Smart Parking: one bay is free — A-20, aisle A, far corner', pg_closed: 'Passage closed for repairs — go round through aisle A from the south',
-  pg_obj_park: 'Pull into A-20 and stop', pg_obj_park_s: 'Tip: press C for the top view', pg_crooked: 'Straighten up: the whole car must be inside the lines',
+  pg_obj_find_s: 'Smart Parking: {n} bays are free. The garage is a maze — press 1–5 and let an algorithm find a route', pg_closed: 'Closed — this is a dead end of the maze, find a way round',
+  pg_obj_park: 'Pull into a free bay and stop', pg_obj_park_s: 'Tip: press C for the top view', pg_crooked: 'Straighten up: the whole car must be inside the lines',
   pg_hits: 'bumps: {n}', pg_cam_chase: 'Behind', pg_cam_cockpit: 'Driver', pg_cam_top: 'Top', pg_video: 'Watch the finished video', pg_back: 'Back up to the map',
   pg_k_gas: 'gas', pg_k_brake: 'brake · reverse', pg_k_steer: 'steer', pg_k_boost: 'boost', pg_k_hand: 'handbrake', pg_k_cam: 'camera', pg_k_reset: 'restart', pg_k_hide: 'hide tips',
-  pg_win: 'Parked!', pg_win_sub: 'Bay A-20 · {time} · bumps: {hits} · accuracy {acc}%', pg_again: 'Play again', pg_kmh: 'km/h', pg_start: 'Press W or ↑ to drive', pg_space: 'Space',
+  pg_win: 'Parked!', pg_win_sub: 'Bay {bay} · {time} · bumps: {hits} · accuracy {acc}%', pg_again: 'Play again', pg_kmh: 'km/h', pg_start: 'Press W or ↑ to drive', pg_space: 'Space',
 };
 
 const rndSeed = { s: 23 };
@@ -24,14 +25,13 @@ const sstep = (a, b, x) => { const k = clamp((x - a) / (b - a), 0, 1); return k 
 const lerp = (a, b, k) => a + (b - a) * k;
 const angDiff = (a, b) => { let d = (a - b) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; };
 
-const AISLES = [{ x: -17.6, id: 'A', col: '#c8463c' }, { x: 0, id: 'B', col: '#2d8a9e' }, { x: 17.6, id: 'C', col: '#3f9a5b' }];
-const XA = -17.6;
-const BAY = 2.6, Z0 = 3.0, NB = 20, CEIL = 2.9;
-const WX = 26.8, ZS = -4.3, ZN = 69.4, ZROW = Z0 + BAY * NB, ZR0 = -35;
-const bayZ = (k) => Z0 + BAY * (k + 0.5);
-const FREE = { x: XA - 6.15, z: bayZ(19), led: XA - 3.78 };
-const BAYRECT = { x0: XA - 8.8, x1: XA - 3.6, z0: Z0 + BAY * 19, z1: Z0 + BAY * 20 };
-const BARRIER_X = -16.2, GATE_Z = -20;
+const CEIL = 2.9, ZR0 = -35, GATE_Z = -20;
+const FREESET = new Set(FREE_BAYS);
+const BAYRECT = (aid, sd, k) => { const ax = aisleX(aid); return { x0: sd < 0 ? ax - 8.8 : ax + 3.6, x1: sd < 0 ? ax - 3.6 : ax + 8.8, z0: Z0 + BAY * k, z1: Z0 + BAY * (k + 1) }; };
+const SLOTS = [];
+for (const A of AISLES) for (const sd of [-1, 1]) for (let k = 0; k < NB; k++) if (!inGap(A.id, sd, k)) SLOTS.push({ A, sd, k, name: bayName(A.id, sd, k), free: FREESET.has(bayName(A.id, sd, k)) });
+const FREESLOTS = SLOTS.filter((b) => b.free);
+const WRECTS = WALLS.map((w) => Object.assign({ w }, wallRect(w)));
 const rampY = (z) => (z < -18 ? 2.8 : z > -4.3 ? 0 : 2.8 * sstep(0, 1, (-4.3 - z) / 13.7));
 const onRamp = (x, z) => z < ZS + 0.3 && Math.abs(x) < 3.4;
 const floorY = (x, z) => (onRamp(x, z) ? rampY(z) : 0);
@@ -115,28 +115,42 @@ export function createGame(host, opts) {
     g.fillStyle = '#ecebe6';
     for (const A of AISLES) for (const sd of [-1, 1]) {
       const xa = A.x + sd * 3.6, xb = A.x + sd * 8.8;
-      for (let k = 0; k <= NB; k++) { const z = Z0 + BAY * k; g.fillRect(U(Math.min(xa, xb)), V(z) - 2, Math.abs(xb - xa) * PX, 4); }
+      for (let k = 0; k <= NB; k++) {
+        const used = (k < NB && !inGap(A.id, sd, k)) || (k > 0 && !inGap(A.id, sd, k - 1));
+        if (used) { const z = Z0 + BAY * k; g.fillRect(U(Math.min(xa, xb)), V(z) - 2, Math.abs(xb - xa) * PX, 4); }
+      }
       g.save(); g.font = '800 22px Inter, sans-serif'; g.fillStyle = 'rgba(236,235,230,.9)'; g.textAlign = 'center'; g.textBaseline = 'middle';
       for (let k = 0; k < NB; k++) {
+        if (inGap(A.id, sd, k)) continue;
         const num = sd < 0 ? k + 1 : k + 21;
         g.save(); g.translate(U(A.x + sd * 8.1), V(bayZ(k))); g.rotate(sd > 0 ? Math.PI / 2 : -Math.PI / 2);
         g.fillText(A.id + ' ' + String(num).padStart(2, '0'), 0, 0); g.restore();
       }
       g.restore();
     }
+    const nearWall = (x, z, r) => WRECTS.some((R) => x > R.x0 - r && x < R.x1 + r && z > R.z0 - r && z < R.z1 + r);
     g.fillStyle = 'rgba(236,235,230,.85)';
-    for (const A of AISLES) for (let z = 9; z < 52; z += 13) { arrow(g, A.x + 1.3, z, 0); arrow(g, A.x - 1.6, z + 6, Math.PI); }
-    for (let x = -22; x <= 22; x += 11) { if (Math.abs(x) < 4) continue; arrow(g, x, -0.5, -Math.PI / 2, 0.9); arrow(g, x + 4, 62, Math.PI / 2, 0.9); }
+    for (const A of AISLES) for (let z = 9; z < 52; z += 13) { if (!nearWall(A.x, z, 3)) arrow(g, A.x + 1.3, z, 0); if (!nearWall(A.x, z + 6, 3)) arrow(g, A.x - 1.6, z + 6, Math.PI); }
+    for (let x = -22; x <= 22; x += 11) { if (Math.abs(x) < 4) continue; if (!nearWall(x, -0.5, 3)) arrow(g, x, -0.5, -Math.PI / 2, 0.9); if (!nearWall(x + 4, 62, 3)) arrow(g, x + 4, 62, Math.PI / 2, 0.9); }
+    for (const P of PASSAGES) {
+      const xa = aisleX(P.a), xb = aisleX(P.b), z = passageZ(P);
+      arrow(g, (xa + xb) / 2 - 3, z + 1.6, -Math.PI / 2, 0.75); arrow(g, (xa + xb) / 2 + 3, z - 1.6, Math.PI / 2, 0.75);
+    }
     g.save(); g.translate(U(1.3), V(-2.4)); g.font = '800 38px Inter, sans-serif'; g.textAlign = 'center'; g.fillText('SLOW', 0, 0); g.restore();
     g.strokeStyle = 'rgba(236,235,230,.7)'; g.lineWidth = 4; g.setLineDash([24, 20]);
     for (const A of AISLES) { g.beginPath(); g.moveTo(U(A.x), V(3.5)); g.lineTo(U(A.x), V(ZROW - 0.5)); g.stroke(); }
+    for (const P of PASSAGES) { const z = passageZ(P); g.beginPath(); g.moveTo(U(aisleX(P.a) + 3.8), V(z)); g.lineTo(U(aisleX(P.b) - 3.8), V(z)); g.stroke(); }
     g.setLineDash([]);
-    g.save(); g.beginPath(); g.rect(U(BARRIER_X - 1.2), V(ZN), 2.4 * PX, (ZN - ZROW) * PX); g.clip();
-    g.strokeStyle = 'rgba(232,190,40,.85)'; g.lineWidth = 9;
-    for (let k = -30; k < 30; k++) { g.beginPath(); g.moveTo(U(BARRIER_X - 1.2) + k * 22, V(ZN)); g.lineTo(U(BARRIER_X - 1.2) + k * 22 + 120, V(ZROW)); g.stroke(); }
-    g.restore();
-    g.font = '800 42px Inter, sans-serif'; g.fillStyle = 'rgba(236,235,230,.92)';
-    g.save(); g.translate(U(FREE.x + 1.2), V(FREE.z)); g.rotate(-Math.PI / 2); g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('A 20', 0, 0); g.restore();
+    for (const R of WRECTS) {
+      const hx0 = R.x0 - (R.w.t === 'lane' ? 0.9 : 0), hx1 = R.x1 + (R.w.t === 'lane' ? 0.9 : 0), hz0 = R.z0 - (R.w.t === 'aisle' ? 0.9 : 0), hz1 = R.z1 + (R.w.t === 'aisle' ? 0.9 : 0);
+      g.save(); g.beginPath(); g.rect(U(hx0), V(hz1), (hx1 - hx0) * PX, (hz1 - hz0) * PX); g.clip();
+      g.fillStyle = 'rgba(20,20,20,.35)'; g.fillRect(U(hx0), V(hz1), (hx1 - hx0) * PX, (hz1 - hz0) * PX);
+      g.strokeStyle = 'rgba(232,190,40,.88)'; g.lineWidth = 9;
+      for (let k = -60; k < 60; k++) { g.beginPath(); g.moveTo(U(hx0) + k * 22, V(hz1)); g.lineTo(U(hx0) + k * 22 + 120, V(hz0)); g.stroke(); }
+      g.restore();
+    }
+    g.font = '800 34px Inter, sans-serif'; g.fillStyle = 'rgba(120,255,170,.92)'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    for (const b of FREESLOTS) { const ax = b.A.x; g.save(); g.translate(U(ax + b.sd * 5.6), V(bayZ(b.k))); g.rotate(b.sd > 0 ? Math.PI / 2 : -Math.PI / 2); g.fillText('P', 0, 0); g.restore(); }
   });
   floorTex.anisotropy = 16;
   {
@@ -226,7 +240,7 @@ export function createGame(host, opts) {
       PILLARS.push({ x: A.x + sg * 3.9, z: Z0 + BAY * 3 * k });
     }
   }
-  for (const A of AISLES) for (const sd of [-1, 1]) for (let k = 0; k < NB; k++) boxAt(LO.yellow, 0.15, 0.12, 1.5, A.x + sd * 8.35, 0.06, bayZ(k));
+  for (const b of SLOTS) boxAt(LO.yellow, 0.15, 0.12, 1.5, b.A.x + b.sd * 8.35, 0.06, bayZ(b.k));
 
   // ---------- cars ----------
   const BODY_COLS = ['#f2f2f0', '#e9e9e7', '#c9cdd1', '#a7acb2', '#2b2e33', '#15171a', '#7d1d22', '#1f3d6b', '#5d6066', '#c9b89a', '#ffffff', '#3b4b5e'];
@@ -284,8 +298,8 @@ export function createGame(host, opts) {
   }
   const TYPES = ['sedan', 'sedan', 'suv', 'hatch', 'sedan', 'suv'];
   const MAPCARS = [];
-  for (const A of AISLES) for (const sd of [-1, 1]) for (let k = 0; k < NB; k++) {
-    if (A.id === 'A' && sd < 0 && k === 19) continue;
+  for (const { A, sd, k, free } of SLOTS) {
+    if (free) continue;
     const type = TYPES[Math.floor(rnd() * TYPES.length)];
     const col = BODY_COLS[Math.floor(rnd() * BODY_COLS.length)];
     const nose = rnd() < 0.62;
@@ -330,22 +344,20 @@ export function createGame(host, opts) {
     return m;
   }
   const ledGeo = [], ledGreen = [];
-  for (const A of AISLES) for (const sd of [-1, 1]) for (let k = 0; k < NB; k++) {
-    const x = A.x + sd * 3.78;
-    const g = new THREE.BoxGeometry(0.14, 0.1, 0.14); g.translate(x, 2.6, -bayZ(k));
-    const st = new THREE.CylinderGeometry(0.015, 0.015, 0.3, 5); st.translate(x, 2.75, -bayZ(k)); HI.dark.push(st);
-    if (A.id === 'A' && sd < 0 && k === 19) ledGreen.push(g); else ledGeo.push(g);
+  for (const b of SLOTS) {
+    const x = b.A.x + b.sd * 3.78, z = bayZ(b.k);
+    const g = new THREE.BoxGeometry(0.14, 0.1, 0.14); g.translate(x, 2.6, -z);
+    const st = new THREE.CylinderGeometry(0.015, 0.015, 0.3, 5); st.translate(x, 2.75, -z); HI.dark.push(st);
+    (b.free ? ledGreen : ledGeo).push(g);
   }
   hi.add(new THREE.Mesh(mergeGeometries(ledGeo), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff2a2a').multiplyScalar(2.6) })));
   hi.add(new THREE.Mesh(mergeGeometries(ledGreen), new THREE.MeshBasicMaterial({ color: new THREE.Color('#2bff6a').multiplyScalar(3.2) })));
   const glowTex = ctex(128, 128, (g, w, h) => { const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64); gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.25, 'rgba(255,255,255,.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)'); g.fillStyle = gr; g.fillRect(0, 0, w, h); });
-  const freeGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: '#38ff7c', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.9 }));
-  freeGlow.position.set(FREE.led, 2.6, -FREE.z); freeGlow.scale.set(1.3, 1.3, 1); hi.add(freeGlow);
-  hangSign(ledSign([{ t: 'WELCOME  ·  777 ABC 01', s: 44, y: 38 }, { t: 'SMART PARKING   FREE: 1', s: 44, y: 98 }], 900, 136), 3.2, 0.48, 0, 2.8 + 2.0, -19.6, 0, 1.4);
-  hangSign(ledSign([{ t: 'P-1  FREE  1', s: 58, y: 48 }, { t: '◀  A-20', s: 42, y: 104 }], 640, 140), 2.3, 0.5, 0, 2.3, 18, 0, 1.5);
-  hangSign(ledSign([{ t: 'A-20 FREE  ◀', s: 58, y: 70 }], 640, 140), 2.3, 0.5, 0, 2.3, 40, 0, 1.5);
-  hangSign(ledSign([{ t: 'A-20  FREE  ▲', s: 58, y: 70 }], 640, 140), 2.3, 0.5, XA, 2.3, 28, 0, 1.5);
-  hangSign(ledSign([{ t: '◀ A-20 via AISLE A', s: 50, y: 70 }], 640, 140, '#ffb02e'), 2.3, 0.5, 8, 2.3, 1.0, 0, 1.5);
+  const glowMat = new THREE.SpriteMaterial({ map: glowTex, color: '#38ff7c', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.9 });
+  for (const b of FREESLOTS) { const sp = new THREE.Sprite(glowMat); sp.position.set(b.A.x + b.sd * 3.78, 2.6, -bayZ(b.k)); sp.scale.set(1.3, 1.3, 1); hi.add(sp); }
+  const NFREE = FREESLOTS.length;
+  hangSign(ledSign([{ t: 'WELCOME  ·  777 ABC 01', s: 44, y: 38 }, { t: 'SMART PARKING   FREE: ' + NFREE, s: 44, y: 98 }], 900, 136), 3.2, 0.48, 0, 2.8 + 2.0, -19.6, 0, 1.4);
+  hangSign(ledSign([{ t: 'P-1  FREE  ' + NFREE, s: 58, y: 48 }, { t: 'MAZE  ·  FIND A ROUTE', s: 36, y: 104 }], 640, 140), 2.3, 0.5, 0, 2.3, 9.5, 0, 1.5);
   for (const A of AISLES) hangSign(ctex(256, 256, (g, w, h) => { g.fillStyle = A.col; g.fillRect(0, 0, w, h); g.fillStyle = '#fff'; g.font = '800 190px Inter, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(A.id, w / 2, h / 2 + 10); }), 0.7, 0.7, A.x, 2.3, 4.0, 0, 1.2);
   hangSign(ctex(768, 200, (g, w, h) => { g.fillStyle = '#1c3d8f'; g.fillRect(0, 0, w, h); g.fillStyle = '#fff'; g.font = '800 120px Inter, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('P-1', w / 2, h / 2 + 6); }), 1.6, 0.42, 0, 2.55, -2.6, 0, 1.25);
   hangSign(ctex(512, 160, (g, w, h) => { g.fillStyle = '#0f8a4b'; g.fillRect(0, 0, w, h); g.fillStyle = '#fff'; g.font = '800 92px Inter, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('EXIT ▶', w / 2, h / 2 + 4); }), 1.2, 0.38, 22.6, 2.35, 64.0, Math.PI / 2, 1.3);
@@ -368,30 +380,46 @@ export function createGame(host, opts) {
   }
   const stripeTex = ctex(512, 64, (g, w, h) => { for (let x = -64; x < w + 64; x += 64) { g.fillStyle = '#e02424'; g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 32, 0); g.lineTo(x + 64, h); g.lineTo(x + 32, h); g.fill(); g.fillStyle = '#f6f6f2'; g.beginPath(); g.moveTo(x + 32, 0); g.lineTo(x + 64, 0); g.lineTo(x + 96, h); g.lineTo(x + 64, h); g.fill(); } });
   const stripeMat = new THREE.MeshStandardMaterial({ map: stripeTex, roughness: 0.45 });
+  const closedTex = ctex(640, 300, (g, w, h) => { g.fillStyle = '#d71f26'; g.fillRect(0, 0, w, h); g.strokeStyle = '#fff'; g.lineWidth = 12; g.strokeRect(14, 14, w - 28, h - 28); g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '800 112px Inter, sans-serif'; g.fillText('CLOSED', w / 2, 120); g.font = '800 50px Inter, sans-serif'; g.fillText('NO THROUGH ROAD', w / 2, 218); });
+  const closedMat = new THREE.MeshStandardMaterial({ map: closedTex, roughness: 0.5, emissive: '#ffffff', emissiveMap: closedTex, emissiveIntensity: 0.35 });
   const BEACONS = [];
-  for (const zc of [57.0, 61.6, 66.2]) {
-    for (const y of [0.55, 0.95]) { const b = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.22, 3.8), stripeMat); b.position.set(BARRIER_X, y, -zc); scene.add(b); }
-    for (const dz of [-1.75, 1.75]) for (const dx of [-0.32, 0.32]) {
-      const leg = new THREE.CylinderGeometry(0.025, 0.03, 1.15, 6); leg.rotateZ(dx > 0 ? -0.28 : 0.28); leg.translate(BARRIER_X + dx * 0.5, 0.56, -(zc + dz)); LO.white.push(leg);
+  for (const R of WRECTS) {
+    const along = R.w.t === 'lane';
+    const L = along ? R.z1 - R.z0 : R.x1 - R.x0, cx = (R.x0 + R.x1) / 2, cz = (R.z0 + R.z1) / 2;
+    const nb = Math.max(1, Math.round(L / 3.8)), seg = L / nb;
+    for (let i = 0; i < nb; i++) {
+      const c = (along ? R.z0 : R.x0) + seg * (i + 0.5);
+      const bx = along ? cx : c, bz = along ? c : cz;
+      for (const y of [0.55, 0.95]) { const m = new THREE.Mesh(along ? new THREE.BoxGeometry(0.06, 0.22, seg - 0.1) : new THREE.BoxGeometry(seg - 0.1, 0.22, 0.06), stripeMat); m.position.set(bx, y, -bz); scene.add(m); }
+      for (const dd of [-seg / 2 + 0.15, seg / 2 - 0.15]) for (const dx of [-0.32, 0.32]) {
+        const leg = new THREE.CylinderGeometry(0.025, 0.03, 1.15, 6);
+        if (along) { leg.rotateZ(dx > 0 ? -0.28 : 0.28); leg.translate(bx + dx * 0.5, 0.56, -(bz + dd)); } else { leg.rotateX(dx > 0 ? -0.28 : 0.28); leg.translate(bx + dd, 0.56, -(bz - dx * 0.5)); }
+        LO.white.push(leg);
+      }
+      const bcn = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.14, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffa21a').multiplyScalar(3) }));
+      bcn.position.set(bx, 1.15, -bz); scene.add(bcn);
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: '#ffa21a', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.9 }));
+      sp.position.copy(bcn.position); sp.scale.set(1.1, 1.1, 1); scene.add(sp);
+      BEACONS.push({ m: bcn, sp, ph: bx * 0.7 + bz });
     }
-    const bcn = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.14, 12), new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffa21a').multiplyScalar(3) }));
-    bcn.position.set(BARRIER_X, 1.15, -zc); scene.add(bcn);
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: '#ffa21a', transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0.9 }));
-    sp.position.copy(bcn.position); sp.scale.set(1.1, 1.1, 1); scene.add(sp);
-    BEACONS.push({ m: bcn, sp, ph: zc });
-  }
-  for (let z = 55.6; z < 69.0; z += 0.9) {
-    const cone = new THREE.ConeGeometry(0.17, 0.62, 14); cone.translate(BARRIER_X + 1.0, 0.33, -z); LO.orange.push(cone);
-    const band = new THREE.CylinderGeometry(0.105, 0.125, 0.09, 14); band.translate(BARRIER_X + 1.0, 0.36, -z); LO.white.push(band);
-    const base = new THREE.BoxGeometry(0.4, 0.04, 0.4); base.translate(BARRIER_X + 1.0, 0.02, -z); LO.orange.push(base);
-  }
-  {
-    const tx = ctex(640, 300, (g, w, h) => { g.fillStyle = '#d71f26'; g.fillRect(0, 0, w, h); g.strokeStyle = '#fff'; g.lineWidth = 12; g.strokeRect(14, 14, w - 28, h - 28); g.fillStyle = '#fff'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = '800 104px Inter, sans-serif'; g.fillText('CLOSED', w / 2, 118); g.font = '800 46px Inter, sans-serif'; g.fillText('MAINTENANCE · AISLE A', w / 2, 216); });
-    for (const ry of [Math.PI / 2, -Math.PI / 2]) {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.7), new THREE.MeshStandardMaterial({ map: tx, roughness: 0.5, emissive: '#ffffff', emissiveMap: tx, emissiveIntensity: 0.35 }));
-      m.position.set(BARRIER_X + (ry > 0 ? 0.05 : -0.05), 1.55, -61.6); m.rotation.y = ry; scene.add(m);
+    const n = Math.max(2, Math.round(L / 0.9));
+    for (let i = 0; i < n; i++) {
+      const c = (along ? R.z0 : R.x0) + (L / n) * (i + 0.5);
+      for (const side of [-1, 1]) {
+        const x = along ? cx + side * 0.75 : c, z = along ? c : cz + side * 0.75;
+        if (i % 2) continue;
+        const cone = new THREE.ConeGeometry(0.17, 0.62, 14); cone.translate(x, 0.33, -z); LO.orange.push(cone);
+        const band = new THREE.CylinderGeometry(0.105, 0.125, 0.09, 14); band.translate(x, 0.36, -z); LO.white.push(band);
+        const base = new THREE.BoxGeometry(0.4, 0.04, 0.4); base.translate(x, 0.02, -z); LO.orange.push(base);
+      }
     }
-    const p1 = new THREE.CylinderGeometry(0.03, 0.03, 1.2, 6); p1.translate(BARRIER_X, 0.6, -61.6); LO.dark.push(p1);
+    for (const side of [-1, 1]) {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(1.5, 0.7), closedMat);
+      if (along) { m.position.set(cx + side * 0.05, 1.55, -cz); m.rotation.y = side > 0 ? Math.PI / 2 : -Math.PI / 2; }
+      else { m.position.set(cx, 1.55, -(cz - side * 0.05)); m.rotation.y = side > 0 ? 0 : Math.PI; }
+      scene.add(m);
+    }
+    const p1 = new THREE.CylinderGeometry(0.03, 0.03, 1.2, 6); p1.translate(cx, 0.6, -cz); LO.dark.push(p1);
   }
   const MATS = {
     concrete: new THREE.MeshStandardMaterial({ color: '#8f8d88', roughness: 0.92 }),
@@ -416,15 +444,19 @@ export function createGame(host, opts) {
 
   // free bay highlight
   const outlineMat = new THREE.MeshBasicMaterial({ color: new THREE.Color('#33ff88').multiplyScalar(1.8), transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false });
+  const fillMat = new THREE.MeshBasicMaterial({ color: '#2bff7a', transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false });
   {
-    const gs = [];
-    const x0 = BAYRECT.x0 + 0.05, x1 = BAYRECT.x1, z0 = BAYRECT.z0 + 0.12, z1 = BAYRECT.z1 - 0.12;
-    const seg = (ax, az, bx, bz) => { const L = Math.hypot(bx - ax, bz - az); const g = new THREE.PlaneGeometry(L, 0.09); g.rotateX(-Math.PI / 2); g.rotateY(-Math.atan2(-(bz - az), bx - ax)); g.translate((ax + bx) / 2, 0.02, -(az + bz) / 2); gs.push(g); };
-    seg(x0, z0, x1, z0); seg(x1, z0, x1, z1); seg(x1, z1, x0, z1); seg(x0, z1, x0, z0);
+    const gs = [], fs = [];
+    for (const b of FREESLOTS) {
+      const r = BAYRECT(b.A.id, b.sd, b.k);
+      const x0 = r.x0 + 0.05, x1 = r.x1 - 0.05, z0 = r.z0 + 0.12, z1 = r.z1 - 0.12;
+      const seg = (ax, az, bx, bz) => { const L = Math.hypot(bx - ax, bz - az); const g = new THREE.PlaneGeometry(L, 0.09); g.rotateX(-Math.PI / 2); g.rotateY(-Math.atan2(-(bz - az), bx - ax)); g.translate((ax + bx) / 2, 0.02, -(az + bz) / 2); gs.push(g); };
+      seg(x0, z0, x1, z0); seg(x1, z0, x1, z1); seg(x1, z1, x0, z1); seg(x0, z1, x0, z0);
+      const f = new THREE.PlaneGeometry(5.1, BAY - 0.3); f.rotateX(-Math.PI / 2); f.translate((r.x0 + r.x1) / 2, 0.015, -(r.z0 + r.z1) / 2); fs.push(f);
+    }
     scene.add(new THREE.Mesh(mergeGeometries(gs), outlineMat));
+    scene.add(new THREE.Mesh(mergeGeometries(fs), fillMat));
   }
-  const bayFill = new THREE.Mesh(new THREE.PlaneGeometry(5.1, BAY - 0.3), new THREE.MeshBasicMaterial({ color: '#2bff7a', transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false }));
-  bayFill.rotation.x = -Math.PI / 2; bayFill.position.set((BAYRECT.x0 + BAYRECT.x1) / 2, 0.015, -FREE.z); scene.add(bayFill);
 
   // ---------- obstacles ----------
   const box = (x0, x1, z0, z1, k = 'wall') => OBST.push({ x0, x1, z0, z1, k });
@@ -433,20 +465,20 @@ export function createGame(host, opts) {
   box(-3.6, -3.2, ZR0 - 1, ZS + 0.31); box(3.2, 3.6, ZR0 - 1, ZS + 0.31); box(-3.6, 3.6, ZR0 - 2, ZR0 - 0.05);
   box(22.8, WX, 64.4, ZN);
   for (const p of PILLARS) box(p.x - 0.3, p.x + 0.3, p.z - 0.3, p.z + 0.3, 'pillar');
-  box(BARRIER_X - 0.45, BARRIER_X + 1.2, 55.1, ZN, 'cone');
+  for (const R of WRECTS) { const lane = R.w.t === 'lane'; box(R.x0 - (lane ? 0.7 : 0), R.x1 + (lane ? 0.7 : 0), R.z0 - (lane ? 0 : 0.7), R.z1 + (lane ? 0 : 0.7), 'cone'); }
   box(2.78, 3.12, GATE_Z - 0.17, GATE_Z + 0.17, 'post');
   const GATEBOX = { x0: -3.2, x1: 3.0, z0: GATE_Z - 0.06, z1: GATE_Z + 0.06, k: 'gate', on: true };
   OBST.push(GATEBOX);
 
   // ---------- AI graph, sensor scans, search view ----------
-  const G = buildGraph({ aisles: AISLES, NB, bayZ, rowS: -0.5, rowN: 62, rowXs: [-22, -17.6, -13.2, -8.8, -4.4, 0, 4.4, 8.8, 13.2, 17.6, 22],
-    ramp: [-32, -28, -24, -20, -16, -12, -8, -4.3], bayOff: 6.2, blocked: [{ x0: BARRIER_X - 0.25, x1: BARRIER_X + 1.2, z0: 55.1, z1: ZN + 1 }] });
-  const BAYS = G.nodes.filter((n) => n.kind === 'bay').map((n) => ({ id: n.id, name: n.name, x: n.x, z: n.z, sd: n.sd, ax: n.x - n.sd * 6.2, free: n.name === 'A-20', st: 0, seen: false, lbl: null, lt: 0 }));
+  const G = buildGraph(graphConfig());
+  const BAYS = G.nodes.filter((n) => n.kind === 'bay').map((n) => ({ id: n.id, name: n.name, x: n.x, z: n.z, sd: n.sd, k: n.k, aisle: n.aisle, ax: n.x - n.sd * 6.2, rect: BAYRECT(n.aisle, n.sd, n.k), free: FREESET.has(n.name), st: 0, seen: false, lbl: null, lt: 0 }));
   const BAYBY = new Map(BAYS.map((b) => [b.id, b]));
-  const GOAL = BAYS.find((b) => b.free).id;
+  const GOALS = BAYS.filter((b) => b.free).map((b) => b.id);
+  const FREEB = BAYS.filter((b) => b.free);
   const LANES = G.nodes.filter((n) => n.kind === 'lane');
   const LANEIX = new Map(LANES.map((n, i) => [n.id, i]));
-  const LABEL = { bfs: 'BFS', dfs: 'DFS', ucs: 'UCS', astar: 'A*' };
+  const LABEL = { bfs: 'BFS', dfs: 'DFS', greedy: 'Greedy', ucs: 'UCS', astar: 'A*' };
 
   function pillTex(text, bg, icon) {
     return ctex(512, 140, (g, w, h) => {
@@ -644,12 +676,12 @@ export function createGame(host, opts) {
     '<div class="pg-right"><button class="pg-btn pg-cam" title="C"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h3l2-3h8l2 3h3v11H3z"/><circle cx="12" cy="13" r="3.5"/></svg><span></span></button>' +
     '<button class="pg-btn pg-snd" aria-label="sound"></button>' +
     '<button class="pg-btn pg-video"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M8 5l11 7-11 7z" fill="currentColor"/></svg><span></span></button></div></div>' +
-    '<div class="pg-algo"><span></span><button data-a="bfs">BFS</button><button data-a="dfs">DFS</button><button data-a="ucs">UCS</button><button data-a="astar">A*</button></div>' +
+    '<div class="pg-algo"><span></span><button data-a="bfs">BFS</button><button data-a="dfs">DFS</button><button data-a="greedy">Greedy</button><button data-a="ucs">UCS</button><button data-a="astar">A*</button></div>' +
     '<div class="pg-sp" hidden><div class="pg-sp-h"><b></b><button class="pg-sp-x" aria-label="close">✕</button></div><p class="pg-sp-d"></p>' +
     '<div class="pg-sp-g"><div><small class="l-exp"></small><b class="v-exp">0</b></div><div><small class="l-front"></small><b class="v-front">0</b></div><div><small class="l-scan"></small><b class="v-scan">0</b></div><div><small class="l-path"></small><b class="v-path">—</b></div></div>' +
     '<div class="pg-sp-bar"><i></i></div><div class="pg-sp-s"></div><div class="pg-sp-lg"></div>' +
     '<div class="pg-sp-b"><button class="pg-btn2 pg-sp-skip"></button><button class="pg-btn2 pg-sp-cmp"></button></div>' +
-    '<table class="pg-tbl" hidden><thead><tr><th class="h-a"></th><th class="h-e"></th><th class="h-s"></th><th class="h-p"></th></tr></thead><tbody></tbody></table></div>' +
+    '<table class="pg-tbl" hidden><thead><tr><th class="h-a"></th><th class="h-e"></th><th class="h-st"></th><th class="h-p"></th><th class="h-b"></th></tr></thead><tbody></tbody></table></div>' +
     '<div class="pg-stat"><span class="pg-time">0:00</span><span class="pg-hits"></span></div>' +
     '<canvas class="pg-map"></canvas>' +
     '<div class="pg-speed"><b>0</b><small></small><i>D</i></div>' +
@@ -661,7 +693,7 @@ export function createGame(host, opts) {
   host.appendChild(hud);
   const q = (s) => hud.querySelector(s);
   const mapCv = q('.pg-map'), mapG = mapCv.getContext('2d');
-  const KEYS = [['W', '↑', 'pg_k_gas'], ['S', '↓', 'pg_k_brake'], ['A D', '← →', 'pg_k_steer'], ['Shift', '', 'pg_k_boost'], ['pg_space', '', 'pg_k_hand'], ['C', '', 'pg_k_cam'], ['R', '', 'pg_k_reset'], ['1 2 3 4', '', 'pg_k_algo'], ['H', '', 'pg_k_hide']];
+  const KEYS = [['W', '↑', 'pg_k_gas'], ['S', '↓', 'pg_k_brake'], ['A D', '← →', 'pg_k_steer'], ['Shift', '', 'pg_k_boost'], ['pg_space', '', 'pg_k_hand'], ['C', '', 'pg_k_cam'], ['R', '', 'pg_k_reset'], ['1 2 3 4 5', '', 'pg_k_algo'], ['H', '', 'pg_k_hide']];
   function texts() {
     q('.pg-back span').textContent = T('pg_back');
     q('.pg-video span').textContent = T('pg_video');
@@ -672,14 +704,14 @@ export function createGame(host, opts) {
     q('.pg-algo span').textContent = T('pg_algo');
     q('.l-exp').textContent = T('pg_s_exp'); q('.l-front').textContent = T('pg_s_front'); q('.l-scan').textContent = T('pg_s_scan'); q('.l-path').textContent = T('pg_s_path');
     q('.pg-sp-skip').textContent = T('pg_skip'); q('.pg-sp-cmp').textContent = T('pg_compare');
-    q('.h-a').textContent = T('pg_t_algo'); q('.h-e').textContent = T('pg_t_exp'); q('.h-s').textContent = T('pg_t_scan'); q('.h-p').textContent = T('pg_t_path');
+    q('.h-a').textContent = T('pg_t_algo'); q('.h-e').textContent = T('pg_t_exp'); q('.h-st').textContent = T('pg_t_steps'); q('.h-p').textContent = T('pg_t_path'); q('.h-b').textContent = T('pg_t_bay');
     q('.pg-sp-lg').innerHTML = [['f', 'pg_l_front'], ['e', 'pg_l_exp'], ['p', 'pg_l_path'], ['o', 'pg_l_occ'], ['g', 'pg_l_free']].map(([c, k]) => '<span><i class="' + c + '"></i>' + T(k) + '</span>').join('');
     q('.pg-keys').innerHTML = KEYS.map(([a, b, k]) => '<div><span>' + (a.startsWith('pg_') ? T(a) : a).split(' ').map((x) => '<kbd>' + x + '</kbd>').join('') + (b ? b.split(' ').map((x) => '<kbd>' + x + '</kbd>').join('') : '') + '</span><em>' + T(k) + '</em></div>').join('');
   }
   texts();
 
   // ---------- state ----------
-  const S = { x: 0.4, z: -29.5, h: 0, v: 0, vl: 0, yr: 0, steer: 0, y: 2.8, pitch: 0, roll: 0, spin: 0, t: 0, run: false, paused: false, done: false, hits: 0, stage: 'gate', gateA: 0, cam: 'chase', camInit: false, still: 0, toastT: 0, closedSaid: false, parkSaid: false, shake: 0, hideKeys: false, keysT: 0, sens: 9, beepT: 0, started: false, startT: 0 };
+  const S = { bay: null, wallSaid: -9, x: START.x, z: START.z, h: 0, v: 0, vl: 0, yr: 0, steer: 0, y: 2.8, pitch: 0, roll: 0, spin: 0, t: 0, run: false, paused: false, done: false, hits: 0, stage: 'gate', gateA: 0, cam: 'chase', camInit: false, still: 0, toastT: 0, closedSaid: false, parkSaid: false, shake: 0, hideKeys: false, keysT: 0, sens: 9, beepT: 0, started: false, startT: 0 };
   const keys = {};
   const touch = {};
   const SV = { on: false, algo: null, res: null, i: 0, acc: 0, phase: '', t: 0, exp: 0, front: 0, scan: 0, results: {}, prevCam: 'chase' };
@@ -688,7 +720,7 @@ export function createGame(host, opts) {
   const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion();
 
   function reset() {
-    Object.assign(S, { x: 0.4, z: -29.5, h: 0, v: 0, vl: 0, yr: 0, steer: 0, y: 2.8, t: 0, done: false, hits: 0, stage: 'gate', gateA: 0, camInit: false, still: 0, closedSaid: false, parkSaid: false, shake: 0, started: false });
+    Object.assign(S, { bay: null, wallSaid: -9, x: START.x, z: START.z, h: 0, v: 0, vl: 0, yr: 0, steer: 0, y: 2.8, t: 0, done: false, hits: 0, stage: 'gate', gateA: 0, camInit: false, still: 0, closedSaid: false, parkSaid: false, shake: 0, started: false });
     GATEBOX.on = true;
     resetAI();
     q('.pg-hits').textContent = T('pg_hits', { n: 0 });
@@ -700,7 +732,7 @@ export function createGame(host, opts) {
     const o = q('.pg-obj');
     const set = (a, b) => { o.querySelector('b').textContent = a; o.querySelector('span').textContent = b; };
     if (S.stage === 'gate' || S.stage === 'gate_open') set(T('pg_obj_gate'), S.stage === 'gate_open' ? T('pg_gate_open') : S.started ? T('pg_obj_gate_s') : T('pg_start'));
-    else if (S.stage === 'find') set(T('pg_obj_find'), T('pg_obj_find_s'));
+    else if (S.stage === 'find') set(T('pg_obj_find'), T('pg_obj_find_s', { n: FREEB.length }));
     else if (S.stage === 'park') set(T('pg_obj_park'), T('pg_obj_park_s'));
     else set(T('pg_win'), '');
   }
@@ -775,7 +807,7 @@ export function createGame(host, opts) {
     else if (e.code === 'KeyR') { reset(); e.preventDefault(); }
     else if (e.code === 'KeyH') { S.hideKeys = !S.hideKeys; q('.pg-keys').classList.toggle('off', S.hideKeys); }
     else if (e.code === 'KeyM') toggleSound();
-    else if (e.code === 'Digit1') runAlgo('bfs'); else if (e.code === 'Digit2') runAlgo('dfs'); else if (e.code === 'Digit3') runAlgo('ucs'); else if (e.code === 'Digit4') runAlgo('astar');
+    else if (/^Digit[1-5]$/.test(e.code)) runAlgo(ALGOS[+e.code.slice(5) - 1]);
   }
   const kd = (e) => onKey(e, true), ku = (e) => onKey(e, false);
   window.addEventListener('keydown', kd, true);
@@ -815,7 +847,7 @@ export function createGame(host, opts) {
     if (b.free) {
       showLabel(b);
       if (first) {
-        toast(T('pg_scan_free'), 3600);
+        toast(T('pg_scan_free', { bay: b.name }), 3600);
         [880, 1175, 1568].forEach((f, i) => blip(f, 0.4, 0.2, 'sine', i * 0.09));
         say(T('pg_v_free'), true);
         if (S.stage === 'find') { S.stage = 'park'; objective(); }
@@ -911,7 +943,7 @@ export function createGame(host, opts) {
     for (const k in keys) keys[k] = false;
     clearViz();
     const st0 = startNode();
-    const res = search(G, a, st0, { isFree: (n) => BAYBY.get(n.id).free, goal: GOAL });
+    const res = search(G, a, st0, { isFree: (n) => BAYBY.get(n.id).free, goals: GOALS });
     SV.start = st0;
     Object.assign(SV, { on: true, algo: a, res, i: 0, acc: 0, phase: 'search', t: 0, exp: 0, front: 0, scan: 0 });
     if (S.cam !== 'overview') SV.prevCam = S.cam;
@@ -953,7 +985,7 @@ export function createGame(host, opts) {
     const r = SV.res;
     SV.phase = 'path'; SV.t = 0;
     for (const id of r.path) setDisc(id, 'path');
-    SV.results[r.algo] = { exp: r.expanded, scan: r.scanned, m: r.cost, steps: r.steps };
+    SV.results[r.algo] = { exp: r.expanded, scan: r.scanned, m: r.cost, steps: r.steps, bay: r.found >= 0 ? G.nodes[r.found].name : '—' };
     renderTable();
     if (r.found >= 0) {
       AP.pts = apBuild(r.path);
@@ -963,19 +995,6 @@ export function createGame(host, opts) {
       [659, 880, 1109].forEach((f, i) => blip(f, 0.35, 0.18, 'sine', i * 0.08));
     }
     updateStats();
-  }
-  function chaikin(pts, it) {
-    let p = pts;
-    for (let k = 0; k < it; k++) {
-      const o = [p[0]];
-      for (let i = 0; i < p.length - 1; i++) {
-        const a = p[i], b = p[i + 1];
-        o.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25], [a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]);
-      }
-      o.push(p[p.length - 1]);
-      p = o;
-    }
-    return p;
   }
   function resample(pts, step) {
     const out = [pts[0]];
@@ -991,29 +1010,79 @@ export function createGame(host, opts) {
     if (Math.hypot(out[out.length - 1][0] - last[0], out[out.length - 1][1] - last[1]) > 0.05) out.push(last);
     return out;
   }
+  function simplify(raw) {
+    const out = [raw[0]];
+    for (let i = 1; i < raw.length; i++) {
+      const p = raw[i], q0 = out[out.length - 1];
+      if (Math.hypot(p[0] - q0[0], p[1] - q0[1]) < 0.3) continue;
+      if (out.length >= 2) {
+        const o = out[out.length - 2];
+        const ax_ = q0[0] - o[0], az_ = q0[1] - o[1], bx_ = p[0] - q0[0], bz_ = p[1] - q0[1];
+        if (Math.abs(ax_ * bz_ - az_ * bx_) < 1e-3 * Math.hypot(ax_, az_) * Math.hypot(bx_, bz_) && ax_ * bx_ + az_ * bz_ > 0) { out[out.length - 1] = p; continue; }
+      }
+      out.push(p);
+    }
+    return out;
+  }
+  function fillet(pts, rmax) {
+    const n = pts.length, T = new Array(n).fill(0), TH = new Array(n).fill(Math.PI);
+    const L = (i) => Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+    for (let i = 1; i < n - 1; i++) {
+      const A = pts[i - 1], B = pts[i], C = pts[i + 1];
+      const ux = A[0] - B[0], uz = A[1] - B[1], vx = C[0] - B[0], vz = C[1] - B[1];
+      const th = Math.acos(clamp((ux * vx + uz * vz) / (Math.hypot(ux, uz) * Math.hypot(vx, vz)), -1, 1));
+      TH[i] = th;
+      if (th < Math.PI - 0.03) T[i] = rmax / Math.tan(th / 2);
+    }
+    for (let it = 0; it < 3; it++) for (let i = 0; i < n - 1; i++) {
+      const l = L(i), s0 = T[i] + T[i + 1];
+      if (s0 > l) { const k = l / s0; T[i] *= k; T[i + 1] *= k; }
+    }
+    const out = [pts[0]];
+    for (let i = 1; i < n - 1; i++) {
+      const B = pts[i];
+      if (!T[i]) { out.push(B); continue; }
+      const A = pts[i - 1], C = pts[i + 1];
+      const la = Math.hypot(A[0] - B[0], A[1] - B[1]), lc = Math.hypot(C[0] - B[0], C[1] - B[1]);
+      const ux = (A[0] - B[0]) / la, uz = (A[1] - B[1]) / la, vx = (C[0] - B[0]) / lc, vz = (C[1] - B[1]) / lc;
+      const t = T[i], r = t * Math.tan(TH[i] / 2);
+      const bxn = ux + vx, bzn = uz + vz, bl = Math.hypot(bxn, bzn) || 1;
+      const cx = B[0] + bxn / bl * (r / Math.sin(TH[i] / 2)), cz = B[1] + bzn / bl * (r / Math.sin(TH[i] / 2));
+      const p1 = [B[0] + ux * t, B[1] + uz * t], p2 = [B[0] + vx * t, B[1] + vz * t];
+      let a1 = Math.atan2(p1[1] - cz, p1[0] - cx), a2 = Math.atan2(p2[1] - cz, p2[0] - cx);
+      let da = a2 - a1; while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+      const m = Math.max(2, Math.ceil(Math.abs(da) * r / 0.3));
+      for (let j = 0; j <= m; j++) { const a = a1 + da * j / m; out.push([cx + r * Math.cos(a), cz + r * Math.sin(a)]); }
+    }
+    out.push(pts[n - 1]);
+    return out;
+  }
   function apBuild(ids) {
     const Nn = G.nodes;
     const bay = Nn[ids[ids.length - 1]], lane = Nn[ids[ids.length - 2]] || bay;
-    const sd = bay.sd, ax = lane.x, bz = bay.z;
-    let d = 1;
-    for (let i = ids.length - 3; i >= 0; i--) { const pv = Nn[ids[i]]; if (Math.abs(pv.z - bz) > 0.5) { d = Math.sign(bz - pv.z) || 1; break; } }
-    const R = 4.2, xs = ax - sd * 2.0;
-    const pts = [[S.x, S.z]];
-    for (let i = 0; i < ids.length - 2; i++) {
-      const n = Nn[ids[i]];
-      if (Math.abs(n.x - ax) < 0.1 && (bz - n.z) * d < R + 4.5 && (bz - n.z) * d > -0.5) continue;
-      if (i === 0 && Math.hypot(n.x - S.x, n.z - S.z) < 1.5) continue;
-      pts.push([n.x, n.z]);
+    const sd = bay.sd, ax = lane.x, bz = bay.z, endX = ax + sd * 6.15;
+    const raw = [[S.x, S.z]];
+    for (let i = 0; i < ids.length - 1; i++) { const n = Nn[ids[i]]; if (i === 0 && Math.hypot(n.x - S.x, n.z - S.z) < 1.5) continue; raw.push([n.x, n.z]); }
+    raw.push([endX, bz]);
+    let pts = simplify(raw);
+    const K = pts.length - 2, Pv = pts[K - 1];
+    const e = Math.abs(bz - Pv[1]);
+    if (K >= 1 && e >= 10.3) {
+      const d = Math.sign(bz - Pv[1]) || 1, R = 4.2, xs = ax - sd * 2.0;
+      pts = pts.slice(0, K);
+      const last = pts[pts.length - 1];
+      const prev = pts[pts.length - 2];
+      if (prev && Math.abs(last[0] - ax) < 0.1 && Math.abs(last[0] - prev[0]) > Math.abs(last[1] - prev[1])) pts[pts.length - 1] = [xs, last[1]];
+      pts.push([xs, bz - d * (R + 3.2)], [xs, bz - d * R]);
+      const sm = fillet(simplify(pts), 3.9);
+      const C = [xs + sd * R, bz - d * R];
+      for (let a = 6; a <= 90; a += 6) { const r = a * Math.PI / 180; sm.push([C[0] - sd * R * Math.cos(r), C[1] + d * R * Math.sin(r)]); }
+      for (let x = C[0] + sd * 0.5; (x - endX) * sd < 0; x += sd * 0.5) sm.push([x, bz]);
+      sm.push([endX, bz]);
+      return resample(sm, 0.4);
     }
-    pts.push([xs, bz - d * (R + 3.2)]);
-    pts.push([xs, bz - d * R]);
-    const sm = chaikin(pts, 3);
-    const C = [xs + sd * R, bz - d * R];
-    for (let a = 6; a <= 90; a += 6) { const r = a * Math.PI / 180; sm.push([C[0] - sd * R * Math.cos(r), C[1] + d * R * Math.sin(r)]); }
-    const endX = ax + sd * 6.15;
-    for (let x = C[0] + sd * 0.5; (x - endX) * sd < 0; x += sd * 0.5) sm.push([x, bz]);
-    sm.push([endX, bz]);
-    return resample(sm, 0.4);
+    if (K >= 1) { const d = Math.sign(bz - Pv[1]) || 1; pts[K] = [pts[K][0], bz - d * 0.28]; pts[K + 1] = [endX, bz - d * 0.22]; }
+    return resample(fillet(pts, 3.9), 0.4);
   }
   function apStart() {
     if (!AP.pts) return;
@@ -1041,12 +1110,13 @@ export function createGame(host, opts) {
     const dx = tx - S.x, dz = tz - S.z, lon = dx * fx + dz * fz, lat = dx * rx + dz * rz;
     const steer = Math.atan2(2 * 2.75 * Math.sin(Math.atan2(lat, lon)), Ld);
     let turn = 0;
-    for (let k = ci + 1; k < Math.min(P.length - 1, ci + 26); k++) {
+    for (let k = Math.max(1, ci - 6); k < Math.min(P.length - 1, ci + 26); k++) {
       const a1 = Math.atan2(P[k][0] - P[k - 1][0], P[k][1] - P[k - 1][1]), a2 = Math.atan2(P[k + 1][0] - P[k][0], P[k + 1][1] - P[k][1]);
       turn += Math.abs(angDiff(a2, a1));
     }
-    let vt = turn > 1.0 ? 2.1 : turn > 0.45 ? 3.0 : 5.0;
+    let vt = turn > 1.4 ? 1.8 : turn > 1.0 ? 2.1 : turn > 0.45 ? 3.0 : 5.0;
     if (Math.abs(lat) > 1.2 && lon < 1) vt = 1.6;
+    if (remain < 9) vt = Math.min(vt, 1.9);
     if (GATEBOX.on && S.z < GATE_Z && S.z > GATE_Z - 9 && Math.abs(S.x) < 3.4) vt = Math.min(vt, Math.max(0, (GATE_Z - 2.6 - S.z) * 0.9));
     vt = Math.min(vt, Math.sqrt(2 * 1.1 * Math.max(0, remain - 0.12)) + 0.05);
     let acc = clamp((vt - S.v) * 2.6, -6.5, 3.2);
@@ -1068,7 +1138,7 @@ export function createGame(host, opts) {
     q('.v-exp').textContent = SV.exp; q('.v-front').textContent = Math.max(0, SV.front); q('.v-scan').textContent = SV.scan;
     q('.v-path').textContent = SV.phase === 'search' ? '—' : Math.round(SV.res.cost) + ' ' + T('pg_m');
     q('.pg-sp-bar i').style.width = (100 * SV.i / SV.res.events.length).toFixed(1) + '%';
-    const bay = 'A-20';
+    const bay = S.done && S.bay ? S.bay : SV.res.found >= 0 ? G.nodes[SV.res.found].name : '—';
     let st = '';
     if (SV.phase === 'search') st = T('pg_s_searching');
     else if (SV.phase === 'path') st = T('pg_s_found', { bay, m: Math.round(SV.res.cost), steps: SV.res.steps });
@@ -1081,8 +1151,8 @@ export function createGame(host, opts) {
   function compareAll() {
     const st = SV.start != null ? SV.start : startNode();
     for (const a of ALGOS) {
-      const r = search(G, a, st, { isFree: (n) => BAYBY.get(n.id).free, goal: GOAL });
-      SV.results[a] = { exp: r.expanded, scan: r.scanned, m: r.cost, steps: r.steps };
+      const r = search(G, a, st, { isFree: (n) => BAYBY.get(n.id).free, goals: GOALS });
+      SV.results[a] = { exp: r.expanded, scan: r.scanned, m: r.cost, steps: r.steps, bay: r.found >= 0 ? G.nodes[r.found].name : '—' };
     }
     renderTable();
   }
@@ -1090,10 +1160,10 @@ export function createGame(host, opts) {
     const tb = q('.pg-tbl'), rows = ALGOS.filter((a) => SV.results[a]);
     if (!rows.length) { tb.hidden = true; return; }
     tb.hidden = false;
-    const minE = Math.min(...rows.map((a) => SV.results[a].exp)), minM = Math.min(...rows.map((a) => SV.results[a].m));
+    const minE = Math.min(...rows.map((a) => SV.results[a].exp)), minM = Math.min(...rows.map((a) => SV.results[a].m)), minS = Math.min(...rows.map((a) => SV.results[a].steps));
     tb.querySelector('tbody').innerHTML = rows.map((a) => {
       const r = SV.results[a];
-      return '<tr' + (a === SV.algo ? ' class="cur"' : '') + '><td>' + LABEL[a] + '</td><td' + (r.exp === minE ? ' class="best"' : '') + '>' + r.exp + '</td><td>' + r.scan + '</td><td' + (Math.abs(r.m - minM) < 0.5 ? ' class="best"' : '') + '>' + Math.round(r.m) + '</td></tr>';
+      return '<tr' + (a === SV.algo ? ' class="cur"' : '') + '><td>' + LABEL[a] + '</td><td' + (r.exp === minE ? ' class="best"' : '') + '>' + r.exp + '</td><td' + (r.steps === minS ? ' class="best"' : '') + '>' + r.steps + '</td><td' + (Math.abs(r.m - minM) < 0.5 ? ' class="best"' : '') + '>' + Math.round(r.m) + '</td><td>' + r.bay + '</td></tr>';
     }).join('');
   }
 
@@ -1176,7 +1246,7 @@ export function createGame(host, opts) {
     S.v += acc * dt;
     if (Math.abs(S.v) < 0.03 && !up && !down && !ap) S.v = 0;
     const sp = Math.abs(S.v);
-    const maxSt = lerp(0.62, 0.2, clamp((sp - 2) / 10, 0, 1));
+    const maxSt = lerp(0.68, 0.2, clamp((sp - 2) / 10, 0, 1));
     const want = (left ? -1 : 0) + (right ? 1 : 0);
     if (ap) S.steer += clamp(clamp(ap.steer, -maxSt, maxSt) - S.steer, -2.8 * dt, 2.8 * dt);
     else if (want) S.steer += clamp(want * maxSt - S.steer, -2.6 * dt, 2.6 * dt);
@@ -1199,14 +1269,27 @@ export function createGame(host, opts) {
     if (S.stage === 'gate_open') { S.gateA = Math.min(1, S.gateA + dt / 1.3); if (S.gateA > 0.55) GATEBOX.on = false; if (S.z > GATE_Z + 2.5) { S.stage = 'find'; objective(); } }
     else if (S.stage !== 'gate' && S.gateA > 0 && S.z > GATE_Z + 6) { S.gateA = Math.max(0, S.gateA - dt / 1.6); if (S.gateA < 0.5) GATEBOX.on = true; }
     gate.rotation.z = -1.42 * sstep(0, 1, S.gateA);
-    if (S.stage === 'find' && !S.closedSaid && S.z > 52 && S.x > BARRIER_X - 0.5 && S.x < -6) { S.closedSaid = true; toast(T('pg_closed'), 4200); blip(520, 0.2, 0.25, 'triangle'); blip(390, 0.3, 0.25, 'triangle', 0.18); }
-    if (S.stage === 'find' && Math.hypot(S.x - FREE.x, S.z - FREE.z) < 12 && S.x < BARRIER_X - 0.5) { S.stage = 'park'; objective(); }
+    if ((S.stage === 'find' || S.stage === 'park') && !AP.on && sp > 0.4 && S.t - S.wallSaid > 8) {
+      for (const R of WRECTS) {
+        const dx = Math.max(R.x0 - S.x, 0, S.x - R.x1), dz = Math.max(R.z0 - S.z, 0, S.z - R.z1);
+        if (Math.hypot(dx, dz) < 4.2) { S.wallSaid = S.t; toast(T('pg_closed'), 4200); blip(520, 0.2, 0.25, 'triangle'); blip(390, 0.3, 0.25, 'triangle', 0.18); break; }
+      }
+    }
+    if (S.stage === 'find' && FREEB.some((b) => Math.abs(S.x - b.ax) < 3.6 && Math.abs(S.z - b.z) < 9)) { S.stage = 'park'; objective(); }
     // parked?
     if (S.stage === 'park' && !S.done) {
-      const inside = corners().every(([cx, cz]) => cx > BAYRECT.x0 - 0.05 && cx < BAYRECT.x1 + 0.18 && cz > BAYRECT.z0 - 0.06 && cz < BAYRECT.z1 + 0.06);
+      const cs = corners();
       const ang = Math.min(Math.abs(angDiff(S.h, -Math.PI / 2)), Math.abs(angDiff(S.h, Math.PI / 2)));
-      if (inside && sp < 0.25 && ang < 0.26) { S.still += dt; if (S.still > 0.8) win(ang); }
-      else { S.still = 0; if (sp < 0.2 && !inside && Math.abs(S.x - FREE.x) < 3 && Math.abs(S.z - FREE.z) < 2 && !S.parkSaid) { S.parkSaid = true; toast(T('pg_crooked')); } }
+      let inBay = null;
+      for (const b of FREEB) {
+        const r = b.rect, lo = b.sd < 0 ? 0.05 : 0.18, hi2 = b.sd < 0 ? 0.18 : 0.05;
+        if (cs.every(([cx, cz]) => cx > r.x0 - lo && cx < r.x1 + hi2 && cz > r.z0 - 0.06 && cz < r.z1 + 0.06)) { inBay = b; break; }
+      }
+      if (inBay && sp < 0.25 && ang < 0.26) { S.still += dt; if (S.still > 0.8) win(ang, inBay); }
+      else {
+        S.still = 0;
+        if (sp < 0.2 && !inBay && !S.parkSaid && FREEB.some((b) => Math.abs(S.x - (b.ax + b.sd * 6.15)) < 3 && Math.abs(S.z - b.z) < 2)) { S.parkSaid = true; toast(T('pg_crooked')); }
+      }
       if (sp > 1) S.parkSaid = false;
     }
     S.spin += S.v * dt / 0.34;
@@ -1232,20 +1315,20 @@ export function createGame(host, opts) {
     const fx = Math.sin(S.h), fz = Math.cos(S.h), rx = Math.cos(S.h), rz = -Math.sin(S.h);
     return [[1, 1], [1, -1], [-1, 1], [-1, -1]].map(([a, b]) => [S.x + fx * HL * a + rx * HW * b, S.z + fz * HL * a + rz * HW * b]);
   }
-  function win(ang) {
-    S.done = true; S.stage = 'done'; objective();
-    const off = Math.abs(S.z - FREE.z) / 0.39, aerr = ang / 0.26;
+  function win(ang, b) {
+    S.done = true; S.stage = 'done'; S.bay = b.name; objective();
+    const off = Math.abs(S.z - b.z) / 0.39, aerr = ang / 0.26;
     const acc = Math.round(clamp(100 - off * 22 - aerr * 22, 40, 100));
     const tm = S.t - (S.startT || 0);
     const stars = 1 + (acc >= 75 ? 1 : 0) + (S.hits === 0 && acc >= 85 ? 1 : 0);
     const w = q('.pg-win');
     w.querySelector('.pg-stars').innerHTML = [0, 1, 2].map((i) => '<i class="' + (i < stars ? 'on' : '') + '">★</i>').join('');
     w.querySelector('h3').textContent = T('pg_win');
-    w.querySelector('p').textContent = T('pg_win_sub', { time: fmt(tm), hits: S.hits, acc }) + (AP.used && SV.res ? '\n' + T('pg_ap_done', { algo: LABEL[AP.used], exp: SV.res.expanded, m: Math.round(SV.res.cost) }) : '');
+    w.querySelector('p').textContent = T('pg_win_sub', { bay: b.name, time: fmt(tm), hits: S.hits, acc }) + (AP.used && SV.res ? '\n' + T('pg_ap_done', { algo: LABEL[AP.used], exp: SV.res.expanded, m: Math.round(SV.res.cost) }) : '');
     if (SV.on) updateStats();
     w.hidden = false; hud.classList.add('won');
     [784, 988, 1175, 1568].forEach((f, i) => blip(f, 0.5, 0.22, 'sine', i * 0.11));
-    if (opts.onWin) opts.onWin({ time: tm, hits: S.hits, acc });
+    if (opts.onWin) opts.onWin({ bay: b.name, time: tm, hits: S.hits, acc });
   }
   const fmt = (s) => { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
 
@@ -1264,6 +1347,7 @@ export function createGame(host, opts) {
     g.fillStyle = '#2a2e35'; g.fillRect(...R(-WX, ZS, WX, ZN)); g.fillRect(...R(-3.2, ZR0, 3.2, ZS));
     g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 1; g.strokeRect(...R(-WX, ZS, WX, ZN));
     for (const A of AISLES) for (const sd of [-1, 1]) for (let k = 0; k <= NB; k++) {
+      if (!((k < NB && !inGap(A.id, sd, k)) || (k > 0 && !inGap(A.id, sd, k - 1)))) continue;
       const z = Z0 + BAY * k, xa = A.x + sd * 3.6, xb = A.x + sd * 8.8;
       const [p0x, p0y] = P(Math.min(xa, xb), z), [p1x] = P(Math.max(xa, xb), z);
       g.fillStyle = 'rgba(255,255,255,.16)'; g.fillRect(p0x, p0y, p1x - p0x, 0.8);
@@ -1271,7 +1355,7 @@ export function createGame(host, opts) {
     g.strokeStyle = 'rgba(255,255,255,.22)'; g.lineWidth = 0.6;
     for (const b of BAYS) { const r = R(b.x - 2.4, b.z - 1.15, b.x + 2.4, b.z + 1.15); g.strokeRect(r[0] + 0.6, r[1] + 0.6, r[2] - 1.2, r[3] - 1.2); }
     g.fillStyle = '#e8e6df'; for (const p of PILLARS) g.fillRect(...R(p.x - 0.4, p.z - 0.4, p.x + 0.4, p.z + 0.4));
-    g.fillStyle = '#ff4d4f'; g.fillRect(...R(BARRIER_X - 0.4, 55.1, BARRIER_X + 1.2, ZN));
+    g.fillStyle = '#ff4d4f'; for (const W of WRECTS) { const lane = W.w.t === 'lane'; g.fillRect(...R(W.x0 - (lane ? 0.5 : 0), W.z0 - (lane ? 0 : 0.6), W.x1 + (lane ? 0.5 : 0), W.z1 + (lane ? 0 : 0.6))); }
     g.fillStyle = 'rgba(255,255,255,.75)'; g.font = '800 ' + Math.round(mapScale * 3.2) + 'px Inter, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
     for (const A of AISLES) { const [ax, ay] = P(A.x, -1.8); g.fillText(A.id, ax, ay); }
     const [rx, ry] = P(0, -27); g.fillText('▲', rx, ry);
@@ -1303,10 +1387,14 @@ export function createGame(host, opts) {
       mapG.stroke();
     }
     const pulse = 0.5 + 0.5 * Math.sin(now / 260);
-    const [bx0, by0] = P(BAYRECT.x0, BAYRECT.z1), [bx1, by1] = P(BAYRECT.x1, BAYRECT.z0);
-    mapG.fillStyle = 'rgba(52,255,130,' + (0.35 + 0.4 * pulse).toFixed(2) + ')'; mapG.fillRect(bx0, by0, bx1 - bx0, by1 - by0);
-    mapG.strokeStyle = 'rgba(52,255,130,' + (0.9 - 0.6 * pulse).toFixed(2) + ')'; mapG.lineWidth = 1.5;
-    mapG.beginPath(); mapG.arc((bx0 + bx1) / 2, (by0 + by1) / 2, 6 + 10 * pulse, 0, 7); mapG.stroke();
+    const tgt = SV.on && SV.res && SV.res.found >= 0 ? SV.res.found : -1;
+    for (const b of FREEB) {
+      const [bx0, by0] = P(b.rect.x0, b.rect.z1), [bx1, by1] = P(b.rect.x1, b.rect.z0);
+      mapG.fillStyle = 'rgba(52,255,130,' + (0.35 + 0.4 * pulse).toFixed(2) + ')'; mapG.fillRect(bx0, by0, bx1 - bx0, by1 - by0);
+      if (tgt >= 0 && b.id !== tgt) continue;
+      mapG.strokeStyle = 'rgba(52,255,130,' + (0.9 - 0.6 * pulse).toFixed(2) + ')'; mapG.lineWidth = 1.5;
+      mapG.beginPath(); mapG.arc((bx0 + bx1) / 2, (by0 + by1) / 2, (tgt >= 0 ? 6 : 3) + (tgt >= 0 ? 10 : 5) * pulse, 0, 7); mapG.stroke();
+    }
     const [cx, cy] = P(S.x, S.z);
     mapG.save(); mapG.translate(cx, cy); mapG.rotate(S.h);
     mapG.fillStyle = '#3FD0E0'; mapG.strokeStyle = '#fff'; mapG.lineWidth = 1.5;
@@ -1400,9 +1488,9 @@ export function createGame(host, opts) {
     revMat.color.set(S.v < -0.1 ? '#ffffff' : '#3a3a3a'); if (S.v < -0.1) revMat.color.multiplyScalar(2.2);
     for (const B of BEACONS) { const k = Math.max(0, Math.sin(S.t * 6 + B.ph)); B.m.material.color.setRGB(1, 0.62, 0.1).multiplyScalar(0.6 + 2.6 * k); B.sp.material.opacity = 0.2 + 0.75 * k; }
     const pul = 0.5 + 0.5 * Math.sin(S.t * 3.2);
-    bayFill.material.opacity = S.done ? 0.25 : 0.06 + 0.12 * pul;
+    fillMat.opacity = S.done ? 0.25 : 0.06 + 0.12 * pul;
     outlineMat.opacity = S.done ? 0.9 : 0.35 + 0.45 * pul;
-    freeGlow.material.opacity = 0.6 + 0.35 * pul;
+    glowMat.opacity = 0.6 + 0.35 * pul;
     gate.userData.lamp.material.color.setRGB(S.gateA > 0.5 ? 0.2 : 1, S.gateA > 0.5 ? 1 : 0.2, 0.2).multiplyScalar(3);
     svTick(dt);
     fxTick(); lblTick();
@@ -1471,6 +1559,6 @@ export function createGame(host, opts) {
       canvas.remove(); hud.remove();
     },
     debug: () => S,
-    debugAI: () => ({ BAYS, FX, SV, AP, ext }),
+    debugAI: () => ({ BAYS, FX, SV, AP, ext, G, OBST, runAlgo, skipSearch, compareAll }),
   };
 }

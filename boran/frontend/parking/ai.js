@@ -1,4 +1,4 @@
-export const ALGOS = ['bfs', 'dfs', 'ucs', 'astar'];
+export const ALGOS = ['bfs', 'dfs', 'greedy', 'ucs', 'astar'];
 
 export function buildGraph(cfg) {
   const nodes = [], byKey = new Map(), adj = [];
@@ -27,30 +27,45 @@ export function buildGraph(cfg) {
   chain(cfg.ramp.map((z) => add(0, z, 'lane')).concat([add(0, cfg.rowS, 'lane')]));
   chain(cfg.rowXs.map((x) => add(x, cfg.rowS, 'lane')));
   chain(cfg.rowXs.map((x) => add(x, cfg.rowN, 'lane')));
+  const gap = cfg.gap || (() => false);
   for (const A of cfg.aisles) {
     const ids = [add(A.x, cfg.rowS, 'lane')];
     for (let k = 0; k < cfg.NB; k++) ids.push(add(A.x, cfg.bayZ(k), 'lane'));
     ids.push(add(A.x, cfg.rowN, 'lane'));
     chain(ids);
     for (let k = 0; k < cfg.NB; k++) for (const sd of [-1, 1]) {
+      if (gap(A.id, sd, k)) continue;
       const num = sd < 0 ? k + 1 : k + 21;
       const b = add(A.x + sd * cfg.bayOff, cfg.bayZ(k), 'bay', { aisle: A.id, sd, k, name: A.id + '-' + String(num).padStart(2, '0') });
       link(ids[k + 1], b);
     }
   }
-  return { nodes, adj };
+  for (const P of cfg.passages || []) {
+    const a = cfg.aisles.find((x) => x.id === P.a), b = cfg.aisles.find((x) => x.id === P.b), z = cfg.bayZ(P.k);
+    const ids = [add(a.x, z, 'lane')];
+    const st = cfg.passStep || 4.4;
+    for (let x = a.x + st; x < b.x - 1; x += st) ids.push(add(x, z, 'lane', { passage: true }));
+    ids.push(add(b.x, z, 'lane'));
+    chain(ids);
+  }
+  return { nodes, adj, blocked: cfg.blocked, dfsOrder: cfg.dfsOrder };
 }
 
 export function nearestLane(G, x, z, hx, hz) {
-  let best = -1, bd = Infinity;
-  for (const n of G.nodes) {
-    if (n.kind !== 'lane') continue;
-    const dx = n.x - x, dz = n.z - z;
-    let d = Math.hypot(dx, dz);
-    if (hx != null && (dx * hx + dz * hz) < -1.5) d += 6;
-    if (d < bd) { bd = d; best = n.id; }
+  const cut = (n) => (G.blocked || []).some((B) => Math.max(x, n.x) >= B.x0 && Math.min(x, n.x) <= B.x1 && Math.max(z, n.z) >= B.z0 && Math.min(z, n.z) <= B.z1);
+  for (const strict of [true, false]) {
+    let best = -1, bd = Infinity;
+    for (const n of G.nodes) {
+      if (n.kind !== 'lane') continue;
+      if (strict && cut(n)) continue;
+      const dx = n.x - x, dz = n.z - z;
+      let d = Math.hypot(dx, dz);
+      if (hx != null && (dx * hx + dz * hz) < -1.5) d += 6;
+      if (d < bd) { bd = d; best = n.id; }
+    }
+    if (best >= 0) return best;
   }
-  return best;
+  return -1;
 }
 
 class Heap {
@@ -64,13 +79,13 @@ class Heap {
   get size() { return this.a.length; }
 }
 
-function ordered(G, id, deep) {
+function ordered(G, id, deep, order) {
   const n = G.nodes[id];
   const rank = (e) => {
     const m = G.nodes[e.to];
     if (m.kind === 'bay') return 0;
     const dx = m.x - n.x, dz = m.z - n.z;
-    if (deep) { if (Math.abs(dz) >= Math.abs(dx)) return dz > 0 ? 1 : 4; return dx > 0 ? 2 : 3; }
+    if (deep) { const dir = Math.abs(dz) >= Math.abs(dx) ? (dz > 0 ? 'N' : 'S') : (dx > 0 ? 'E' : 'W'); return 1 + (order || 'NEWS').indexOf(dir); }
     if (Math.abs(dz) >= Math.abs(dx)) return dz < 0 ? 1 : 4;
     return dx < 0 ? 2 : 3;
   };
@@ -78,12 +93,15 @@ function ordered(G, id, deep) {
 }
 
 export function search(G, algo, start, opt) {
-  const isFree = opt.isFree, goal = opt.goal;
+  const isFree = opt.isFree;
+  const goals = opt.goals || (opt.goal != null ? [opt.goal] : []);
   const N = G.nodes, ev = [];
   const parent = new Map([[start, -1]]), g = new Map([[start, 0]]);
   const seenBay = new Set();
   let expanded = 0, scanned = 0, found = -1, maxFront = 1;
-  const h = (id) => (goal == null || algo !== 'astar' ? 0 : Math.hypot(N[id].x - N[goal].x, N[id].z - N[goal].z));
+  const dist = (id) => { let m = Infinity; for (const t of goals) m = Math.min(m, Math.hypot(N[id].x - N[t].x, N[id].z - N[t].z)); return goals.length ? m : 0; };
+  const h = (id) => (algo === 'astar' || algo === 'greedy' ? dist(id) : 0);
+  const prio = (gv, id) => (algo === 'greedy' ? h(id) : gv + h(id));
   const scanBay = (bay, from) => {
     if (seenBay.has(bay)) return null;
     seenBay.add(bay); scanned++;
@@ -100,7 +118,7 @@ export function search(G, algo, start, opt) {
       done.add(id); parent.set(id, p); if (p >= 0) g.set(id, g.get(p) + Math.hypot(N[id].x - N[p].x, N[id].z - N[p].z));
       expanded++;
       ev.push(['exp', id, st.length, p]);
-      const nb = ordered(G, id, true);
+      const nb = ordered(G, id, true, opt.dfsOrder || G.dfsOrder);
       for (const e of nb) {
         if (N[e.to].kind !== 'bay') continue;
         const free = scanBay(e.to, id);
@@ -135,9 +153,30 @@ export function search(G, algo, start, opt) {
       }
       maxFront = Math.max(maxFront, fr.length);
     }
-  } else {
+  } else if (algo === 'greedy') {
     const pq = new Heap();
     pq.push(h(start), start);
+    ev.push(['gen', start, -1]);
+    const closed = new Set();
+    while (pq.size) {
+      const [, id] = pq.pop();
+      if (closed.has(id)) continue;
+      closed.add(id);
+      expanded++;
+      ev.push(['exp', id, pq.size]);
+      if (N[id].kind === 'bay') { found = id; break; }
+      for (const e of ordered(G, id)) {
+        if (closed.has(e.to) || parent.has(e.to)) continue;
+        if (N[e.to].kind === 'bay' && !scanBay(e.to, id)) continue;
+        parent.set(e.to, id); g.set(e.to, g.get(id) + e.w);
+        pq.push(h(e.to), e.to);
+        ev.push(['gen', e.to, id]);
+      }
+      maxFront = Math.max(maxFront, pq.size);
+    }
+  } else {
+    const pq = new Heap();
+    pq.push(prio(0, start), start);
     ev.push(['gen', start, -1]);
     const closed = new Set();
     while (pq.size) {
@@ -156,7 +195,7 @@ export function search(G, algo, start, opt) {
         const ng = g.get(id) + e.w;
         if (!g.has(e.to) || ng < g.get(e.to) - 1e-9) {
           g.set(e.to, ng); parent.set(e.to, id);
-          pq.push(ng + h(e.to), e.to);
+          pq.push(prio(ng, e.to), e.to);
           ev.push(['gen', e.to, id]);
         }
       }
