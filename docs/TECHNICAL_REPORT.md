@@ -157,7 +157,7 @@ while heap:
 | DFS | 17 104 | 236 km | 0 / 25 | +8 143 % | 91.5 % |
 | UCS | 11 566 | 4.3 km | 25 / 25 | 0 % | 7.2 % |
 | Greedy | 106 | 5.3 km | 0 / 25 | +58 % | 12.1 % |
-| **A\*** | **6 411** | **4.3 km** | **25 / 25** | **0 %** | **7.2 %** |
+| **A*** | **6 411** | **4.3 km** | **25 / 25** | **0 %** | **7.2 %** |
 
 - A\* expands on average **47.6 % fewer nodes than UCS** with the same optimal cost.
 - BFS minimises the number of segments, not metres or risk. DFS finds *a* path, but it wanders across the city. Greedy is the fastest to compute but ignores the cost so far.
@@ -165,14 +165,22 @@ while heap:
 
 ### 4.4 Search in the parking game
 
-The EXPO parking (level −1) is a drivable 3D game. The garage is a graph of 90 lane nodes and 120 bays. Smart-parking sensors say that only bay A-20 is free, and the player can press BFS, DFS, UCS or A\* to watch the search and let the autopilot drive to the bay (pure-pursuit steering).
+The EXPO parking (level −1) is a drivable 3D game built as a maze. Four passages cut through the parking islands, four walls close parts of the aisles and the north lane, and the smart-parking sensors report **five free bays**. The garage graph has 174 nodes: 78 lane nodes (junctions and bay entrances) and 96 bays. A bay enters the frontier only after its sensor says it is free; the goal test is done when a node is taken from the frontier (BFS and DFS stop as soon as a free bay is seen). Greedy and A\* use h = straight-line distance to the nearest free bay, which is admissible and consistent. DFS checks neighbours in a fixed order (west, north, east, south). The player can press BFS, DFS, Greedy, UCS or A\* (keys 1–5), watch the search, and let the autopilot drive the found route (pure-pursuit steering with corner arcs around the pillars).
 
-| Start | BFS | DFS | UCS | A\* |
+![Five searches from the entrance](img/parking_routes.jpg)
+
+| From the entrance | Bay | Nodes expanded | Steps | Path |
 |---|---|---|---|---|
-| Ramp (entrance): nodes expanded / path | 83 / 105 m | 86 / 105 m | 87 / 105 m | **57 / 105 m** |
-| Aisle C, middle: nodes expanded / path | 88 / 126 m | 79 / **190 m** | 89 / 126 m | 83 / 126 m |
+| BFS | C-28 | 49 | **23** | 90 m |
+| DFS | A-20 | 34 | 31 | 141 m |
+| Greedy | C-14 | **28** | 25 | 125 m |
+| UCS | B-17 | 52 | 25 | **80 m** |
+| A\* | B-17 | 35 | 25 | **80 m** |
 
-From aisle C, DFS returns a path 64 m longer than the optimum, which shows on a small graph the same weakness seen on the city graph.
+- **UCS and A*** find the same shortest route (80 m straight up aisle B); A\* opens 35 nodes instead of 52.
+- **BFS** counts hops, not metres: it reaches C-28 in 23 steps through a passage, but the route is 90 m.
+- **Greedy** looks only at h(n). Bays in aisle C look closest, so it drives there, runs into the closed aisle and detours: fewest nodes (28), but 125 m.
+- **DFS** dives into the first branch (west), zigzags through the passages and parks in A-20 after 141 m.
 
 ## 5. AI topic 3 — Sequential decision making (MDP)
 
@@ -222,7 +230,7 @@ The AI plan covers 410 km instead of 537 km and still prevents more falls, becau
 - **First-person walk:** a navigator with turn-by-turn instructions, an eye-level mode and a north-up mini-map.
 - **Profiles:** default, older person, pram, wheelchair.
 - **Languages:** Russian, Kazakh, English. Light and dark map themes.
-- **EXPO parking −1:** click the EXPO sphere to descend into the parking and drive a car (WASD, cameras, sounds), with sensor scanning ("taken / free") and the four search algorithms.
+- **EXPO parking −1:** click the EXPO sphere to descend into the parking and drive a car (WASD, cameras, sounds), with sensor scanning ("taken / free") and five search algorithms in a maze garage.
 
 ## 8. Testing
 
@@ -231,9 +239,9 @@ The AI plan covers 410 km instead of 537 km and still prevents more falls, becau
 | `tests/test_boran.py` | forward beliefs are a distribution; Viterbi equals brute force; thaw → frost gives ice; Bayes checked by hand; safe and shortest A\* differ; cost ≥ length; UCS = A\* on a real-shape graph; BFS/DFS/UCS/Greedy on a toy graph; MDP walks a short calm trip and waits when a blizzard eases; full pipeline | pass |
 | `tests/test_frost.py`, `tests/test_nav.py` | wind chill matches the Canadian table; route stops at warm places when the walk is too cold; sidewalk sides, crossings and turn-by-turn legs | pass |
 | `tests/test_night.py`, `tests/test_reports.py`, `tests/test_hall.py` | ice builds up overnight; AI plan prevents more falls than "main roads first"; Bayes update of crowd ice marks rises/falls and fades to the prior; nearest free truck is sent | pass |
-| `tests/js/parking_ai.test.mjs` | garage graph; every algorithm finds A-20; paths use real edges; UCS = A\* cost; A\* never expands more than UCS; the event log replays | pass |
+| `tests/js/parking_ai.test.mjs` | passages and walls in the garage graph; every algorithm reaches a free bay from five starts; paths use real edges; UCS = A\* cost, BFS has the fewest steps; A\* never expands more than UCS; from the entrance the five algorithms end in different bays; the event log replays | pass |
 
-`pytest -q` → **47 passed**; `node --test tests/js/parking_ai.test.mjs` → **7 passed**. The evaluation script `tools/evaluate.py` reproduces every table in this report.
+`pytest -q` → **47 passed**; `node --test tests/js/parking_ai.test.mjs` → **9 passed**. The evaluation script `tools/evaluate.py` reproduces every table in this report.
 
 Manual checks on the live site: desktop and phone browsers, all five weather scenarios, the four walker profiles, three languages, and the parking game at low frame rates.
 

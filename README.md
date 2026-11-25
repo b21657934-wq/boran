@@ -16,11 +16,11 @@
 >
 > **Sample input → output** (scenario "thaw → night frost"): weather observations `thaw_dry ×2, thaw_wet ×2, thaw_dry, zero_cross ×2, frost_dry ×5` → HMM: P(ice) = 0.49 → Bayes: shaded courtyard 0.72, cleaned avenue 0.33 → A* on 25 random routes: 47.6 % fewer expanded nodes than UCS with the same optimal cost; safe route +4.7 % distance, −21.4 % chance to slip → MDP: 35-minute walk in snow → take the bus (Q = −38.2 vs −53.1 for walking).
 >
-> **Tests:** `pytest -q` (47 tests) and `node --test tests/js/parking_ai.test.mjs` (7 tests).
+> **Tests:** `pytest -q` (47 tests) and `node --test tests/js/parking_ai.test.mjs` (9 tests).
 >
-> | Safe route and search comparison | AI brain: HMM → Bayes → A* → MDP | EXPO parking: A* finds the free bay |
+> | Safe route and search comparison | AI brain: HMM → Bayes → A* → MDP | EXPO parking maze: five algorithms, five routes |
 > |---|---|---|
-> | ![](docs/img/shot_algos.jpg) | ![](docs/img/shot_brain_hmm.jpg) | ![](docs/img/shot_astar_done.jpg) |
+> | ![](docs/img/shot_algos.jpg) | ![](docs/img/shot_brain_hmm.jpg) | ![](docs/img/crop_parking.jpg) |
 
 Зимой в Астане лёд под снегом не видно. БОРАН по погоде за последние часы оценивает скрытое состояние улиц, считает риск для каждого участка, строит безопасный маршрут и советует: идти сейчас, переждать или ехать автобусом.
 
